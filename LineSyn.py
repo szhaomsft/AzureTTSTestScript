@@ -66,6 +66,11 @@ def synthesize_line(speech_config, voice, text, output_file, locale="", deployme
         ssml += "</lang>"
     ssml += "</voice></speak>"
 
+    # Save SSML to file alongside the WAV
+    ssml_file = os.path.splitext(output_file)[0] + ".ssml"
+    with open(ssml_file, "w", encoding="utf-8") as sf:
+        sf.write(ssml)
+
     # Set deployment if provided
     if deployment:
         speech_config.endpoint_id = deployment
