@@ -152,7 +152,12 @@ namespace AzureTTSStreaming
             };
 
             // Collect per-iteration results for the summary table.
-            var results = new List<(int Iter, long TtfabMs, long TotalMs, uint AudioBytes)>();
+            // RTF (Real-Time Factor) = synthesis_time / audio_duration.
+            // For 24 kHz, 16-bit, mono PCM the byte rate is 48000 B/s;
+            // the RIFF header is 46 bytes.
+            const double byteRate = 24000.0 * 2; // 48000 B/s
+            const int riffHeaderSize = 46;
+            var results = new List<(int Iter, long TtfabMs, long TotalMs, uint AudioBytes, double Rtf)>();
 
             Console.WriteLine($"Running {iterations} iteration(s) with a warm (reused) synthesizer …");
             Console.WriteLine();
@@ -197,26 +202,28 @@ namespace AzureTTSStreaming
                 }
 
                 long totalMs = requestStart.ElapsedMilliseconds;
-                results.Add((iter, ttfabMs, totalMs, totalBytes));
-                Console.WriteLine($"\r  Iteration {iter}: TTFAB = {(ttfabMs >= 0 ? ttfabMs + " ms" : "n/a"),-10}  Total = {totalMs,6} ms  Audio = {totalBytes,8} bytes  → {iterPath}");
+                double audioDurationMs = Math.Max(totalBytes - riffHeaderSize, 0) / byteRate * 1000.0;
+                double rtf = audioDurationMs > 0 ? totalMs / audioDurationMs : 0;
+                results.Add((iter, ttfabMs, totalMs, totalBytes, rtf));
+                Console.WriteLine($"\r  Iteration {iter}: TTFAB = {(ttfabMs >= 0 ? ttfabMs + " ms" : "n/a"),-10}  Total = {totalMs,6} ms  RTF = {rtf:F3}  Audio = {totalBytes,8} bytes  → {iterPath}");
             }
 
             // --- Summary table ---
             Console.WriteLine();
             Console.WriteLine("=== Latency Summary (warm synthesizer) ===");
-            Console.WriteLine($"  {"Iter",-6} {"TTFAB (ms)",12} {"Total (ms)",12} {"Audio (bytes)",14}");
-            Console.WriteLine($"  {"----",-6} {"----------",12} {"----------",12} {"--------------",14}");
+            Console.WriteLine($"  {"Iter",-6} {"TTFAB (ms)",12} {"Total (ms)",12} {"RTF",8} {"Audio (bytes)",14}");
+            Console.WriteLine($"  {"----",-6} {"----------",12} {"----------",12} {"--------",8} {"--------------",14}");
             foreach (var r in results)
-                Console.WriteLine($"  {r.Iter,-6} {(r.TtfabMs >= 0 ? r.TtfabMs.ToString() : "n/a"),12} {r.TotalMs,12} {r.AudioBytes,14}");
+                Console.WriteLine($"  {r.Iter,-6} {(r.TtfabMs >= 0 ? r.TtfabMs.ToString() : "n/a"),12} {r.TotalMs,12} {r.Rtf,8:F3} {r.AudioBytes,14}");
 
             if (results.Count > 1)
             {
                 var valid = results.Where(r => r.TtfabMs >= 0).ToList();
                 if (valid.Count > 0)
                 {
-                    Console.WriteLine($"  {"avg",-6} {valid.Average(r => r.TtfabMs),12:F0} {results.Average(r => r.TotalMs),12:F0} {results.Average(r => r.AudioBytes),14:F0}");
-                    Console.WriteLine($"  {"min",-6} {valid.Min(r => r.TtfabMs),12} {results.Min(r => r.TotalMs),12} {results.Min(r => r.AudioBytes),14}");
-                    Console.WriteLine($"  {"max",-6} {valid.Max(r => r.TtfabMs),12} {results.Max(r => r.TotalMs),12} {results.Max(r => r.AudioBytes),14}");
+                    Console.WriteLine($"  {"avg",-6} {valid.Average(r => r.TtfabMs),12:F0} {results.Average(r => r.TotalMs),12:F0} {results.Average(r => r.Rtf),8:F3} {results.Average(r => r.AudioBytes),14:F0}");
+                    Console.WriteLine($"  {"min",-6} {valid.Min(r => r.TtfabMs),12} {results.Min(r => r.TotalMs),12} {results.Min(r => r.Rtf),8:F3} {results.Min(r => r.AudioBytes),14}");
+                    Console.WriteLine($"  {"max",-6} {valid.Max(r => r.TtfabMs),12} {results.Max(r => r.TotalMs),12} {results.Max(r => r.Rtf),8:F3} {results.Max(r => r.AudioBytes),14}");
                 }
             }
             Console.WriteLine("===========================================");
