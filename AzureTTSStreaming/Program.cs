@@ -48,7 +48,7 @@ namespace AzureTTSStreaming
             string voice = "en-US-Ava:DragonHDLatestNeural";
             string locale = "en-US";
             string text = DefaultText;
-            string output = "output.wav";
+            string output = "output.pcm";
 
             for (int i = 0; i < args.Length; i++)
             {
@@ -82,9 +82,9 @@ namespace AzureTTSStreaming
             // --- Configure speech service ---
             var speechConfig = SpeechConfig.FromSubscription(key, region);
 
-            // Request 24-kHz 16-bit mono PCM so we can wrap it in a WAV header.
+            // Raw 24-kHz 16-bit mono PCM — no RIFF header, true streaming format.
             speechConfig.SetSpeechSynthesisOutputFormat(
-                SpeechSynthesisOutputFormat.Riff24Khz16BitMonoPcm);
+                SpeechSynthesisOutputFormat.Raw24Khz16BitMonoPcm);
 
             // --- Build SSML ---
             // HD voices require SSML to specify the exact voice name (including the
@@ -152,12 +152,10 @@ namespace AzureTTSStreaming
             };
 
             // Collect per-iteration results for the summary table.
-            // RTF (Real-Time Factor) = synthesis_time / audio_duration.
-            // For 24 kHz, 16-bit, mono PCM the byte rate is 48000 B/s;
-            // the RIFF header is 46 bytes.
+            // For 24 kHz, 16-bit, mono PCM the byte rate is 48000 B/s.
+            // Raw format has no header, so all bytes are audio data.
             const double byteRate = 24000.0 * 2; // 48000 B/s
-            const int riffHeaderSize = 46;
-            var results = new List<(int Iter, long TtfabMs, long TotalMs, uint AudioBytes, double Rtf)>();
+            var results = new List<(int Iter, long TtfabMs, long TtlbMs, uint AudioBytes, double AudioDurationSec, double Rtf)>();
 
             Console.WriteLine($"Running {iterations} iteration(s) with a warm (reused) synthesizer …");
             Console.WriteLine();
@@ -202,28 +200,28 @@ namespace AzureTTSStreaming
                 }
 
                 long totalMs = requestStart.ElapsedMilliseconds;
-                double audioDurationMs = Math.Max(totalBytes - riffHeaderSize, 0) / byteRate * 1000.0;
-                double rtf = audioDurationMs > 0 ? totalMs / audioDurationMs : 0;
-                results.Add((iter, ttfabMs, totalMs, totalBytes, rtf));
-                Console.WriteLine($"\r  Iteration {iter}: TTFAB = {(ttfabMs >= 0 ? ttfabMs + " ms" : "n/a"),-10}  Total = {totalMs,6} ms  RTF = {rtf:F3}  Audio = {totalBytes,8} bytes  → {iterPath}");
+                double audioDurationSec = totalBytes / byteRate;
+                double rtf = audioDurationSec > 0 ? (totalMs / 1000.0) / audioDurationSec : 0;
+                results.Add((iter, ttfabMs, totalMs, totalBytes, audioDurationSec, rtf));
+                Console.WriteLine($"\r  Iteration {iter}: TTFAB = {(ttfabMs >= 0 ? ttfabMs + " ms" : "n/a"),-10}  TTLB = {totalMs,6} ms  Audio = {audioDurationSec:F2}s  RTF = {rtf:F3}  → {iterPath}");
             }
 
             // --- Summary table ---
             Console.WriteLine();
             Console.WriteLine("=== Latency Summary (warm synthesizer) ===");
-            Console.WriteLine($"  {"Iter",-6} {"TTFAB (ms)",12} {"Total (ms)",12} {"RTF",8} {"Audio (bytes)",14}");
-            Console.WriteLine($"  {"----",-6} {"----------",12} {"----------",12} {"--------",8} {"--------------",14}");
+            Console.WriteLine($"  {"Iter",-6} {"TTFAB (ms)",12} {"TTLB (ms)",12} {"Audio (s)",10} {"RTF",8} {"Audio (bytes)",14}");
+            Console.WriteLine($"  {"----",-6} {"----------",12} {"----------",12} {"----------",10} {"--------",8} {"--------------",14}");
             foreach (var r in results)
-                Console.WriteLine($"  {r.Iter,-6} {(r.TtfabMs >= 0 ? r.TtfabMs.ToString() : "n/a"),12} {r.TotalMs,12} {r.Rtf,8:F3} {r.AudioBytes,14}");
+                Console.WriteLine($"  {r.Iter,-6} {(r.TtfabMs >= 0 ? r.TtfabMs.ToString() : "n/a"),12} {r.TtlbMs,12} {r.AudioDurationSec,10:F2} {r.Rtf,8:F3} {r.AudioBytes,14}");
 
             if (results.Count > 1)
             {
                 var valid = results.Where(r => r.TtfabMs >= 0).ToList();
                 if (valid.Count > 0)
                 {
-                    Console.WriteLine($"  {"avg",-6} {valid.Average(r => r.TtfabMs),12:F0} {results.Average(r => r.TotalMs),12:F0} {results.Average(r => r.Rtf),8:F3} {results.Average(r => r.AudioBytes),14:F0}");
-                    Console.WriteLine($"  {"min",-6} {valid.Min(r => r.TtfabMs),12} {results.Min(r => r.TotalMs),12} {results.Min(r => r.Rtf),8:F3} {results.Min(r => r.AudioBytes),14}");
-                    Console.WriteLine($"  {"max",-6} {valid.Max(r => r.TtfabMs),12} {results.Max(r => r.TotalMs),12} {results.Max(r => r.Rtf),8:F3} {results.Max(r => r.AudioBytes),14}");
+                    Console.WriteLine($"  {"avg",-6} {valid.Average(r => r.TtfabMs),12:F0} {results.Average(r => r.TtlbMs),12:F0} {results.Average(r => r.AudioDurationSec),10:F2} {results.Average(r => r.Rtf),8:F3} {results.Average(r => r.AudioBytes),14:F0}");
+                    Console.WriteLine($"  {"min",-6} {valid.Min(r => r.TtfabMs),12} {results.Min(r => r.TtlbMs),12} {results.Min(r => r.AudioDurationSec),10:F2} {results.Min(r => r.Rtf),8:F3} {results.Min(r => r.AudioBytes),14}");
+                    Console.WriteLine($"  {"max",-6} {valid.Max(r => r.TtfabMs),12} {results.Max(r => r.TtlbMs),12} {results.Max(r => r.AudioDurationSec),10:F2} {results.Max(r => r.Rtf),8:F3} {results.Max(r => r.AudioBytes),14}");
                 }
             }
             Console.WriteLine("===========================================");
