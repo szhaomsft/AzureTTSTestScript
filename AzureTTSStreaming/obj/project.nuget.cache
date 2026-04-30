@@ -1,0 +1,23 @@
+{
+  "version": 2,
+  "dgSpecHash": "jZIJX8v2R6E=",
+  "success": true,
+  "projectFilePath": "/home/runner/work/AzureTTSTestScript/AzureTTSTestScript/AzureTTSStreaming/AzureTTSStreaming.csproj",
+  "expectedPackageFiles": [
+    "/tmp/codeql-scratch-a6e6c657f025ef16/dbs/csharp/working/packages/azure.core/1.44.1/azure.core.1.44.1.nupkg.sha512",
+    "/tmp/codeql-scratch-a6e6c657f025ef16/dbs/csharp/working/packages/microsoft.bcl.asyncinterfaces/6.0.0/microsoft.bcl.asyncinterfaces.6.0.0.nupkg.sha512",
+    "/tmp/codeql-scratch-a6e6c657f025ef16/dbs/csharp/working/packages/microsoft.cognitiveservices.speech/1.43.0/microsoft.cognitiveservices.speech.1.43.0.nupkg.sha512",
+    "/tmp/codeql-scratch-a6e6c657f025ef16/dbs/csharp/working/packages/system.clientmodel/1.1.0/system.clientmodel.1.1.0.nupkg.sha512",
+    "/tmp/codeql-scratch-a6e6c657f025ef16/dbs/csharp/working/packages/system.diagnostics.diagnosticsource/6.0.1/system.diagnostics.diagnosticsource.6.0.1.nupkg.sha512",
+    "/tmp/codeql-scratch-a6e6c657f025ef16/dbs/csharp/working/packages/system.memory.data/6.0.0/system.memory.data.6.0.0.nupkg.sha512",
+    "/tmp/codeql-scratch-a6e6c657f025ef16/dbs/csharp/working/packages/system.numerics.vectors/4.5.0/system.numerics.vectors.4.5.0.nupkg.sha512",
+    "/tmp/codeql-scratch-a6e6c657f025ef16/dbs/csharp/working/packages/system.runtime.compilerservices.unsafe/6.0.0/system.runtime.compilerservices.unsafe.6.0.0.nupkg.sha512",
+    "/tmp/codeql-scratch-a6e6c657f025ef16/dbs/csharp/working/packages/system.text.encodings.web/6.0.0/system.text.encodings.web.6.0.0.nupkg.sha512",
+    "/tmp/codeql-scratch-a6e6c657f025ef16/dbs/csharp/working/packages/system.text.json/6.0.10/system.text.json.6.0.10.nupkg.sha512",
+    "/tmp/codeql-scratch-a6e6c657f025ef16/dbs/csharp/working/packages/system.threading.tasks.extensions/4.5.4/system.threading.tasks.extensions.4.5.4.nupkg.sha512",
+    "/tmp/codeql-scratch-a6e6c657f025ef16/dbs/csharp/working/packages/microsoft.netcore.app.ref/8.0.25/microsoft.netcore.app.ref.8.0.25.nupkg.sha512",
+    "/tmp/codeql-scratch-a6e6c657f025ef16/dbs/csharp/working/packages/microsoft.aspnetcore.app.ref/8.0.25/microsoft.aspnetcore.app.ref.8.0.25.nupkg.sha512",
+    "/tmp/codeql-scratch-a6e6c657f025ef16/dbs/csharp/working/packages/microsoft.netcore.app.host.linux-x64/8.0.25/microsoft.netcore.app.host.linux-x64.8.0.25.nupkg.sha512"
+  ],
+  "logs": []
+}
