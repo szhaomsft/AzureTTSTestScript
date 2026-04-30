@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("AzureTTSStreaming")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+143036227245e1cd1ef9559127ef123a565bd7dc")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+18465cdd07f58efe49965fe1bf9cc1177f614055")]
 [assembly: System.Reflection.AssemblyProductAttribute("AzureTTSStreaming")]
 [assembly: System.Reflection.AssemblyTitleAttribute("AzureTTSStreaming")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

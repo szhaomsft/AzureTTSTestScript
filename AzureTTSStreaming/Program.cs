@@ -28,9 +28,17 @@ namespace AzureTTSStreaming
     {
         // Default sample text used when --text is not supplied.
         private const string DefaultText =
-            "Hello! This is a streaming synthesis demo using Azure HD neural voice. " +
-            "Audio bytes are delivered incrementally as the service generates them, " +
-            "so playback or file writing can begin before synthesis has finished.";
+            "In the rapidly evolving world of artificial intelligence, voice synthesis has undergone " +
+            "a remarkable transformation over the past decade. Early text-to-speech systems produced " +
+            "robotic, monotone output that was immediately recognizable as synthetic. Today, neural " +
+            "text-to-speech models, particularly high-definition voices powered by deep learning, " +
+            "generate speech that is nearly indistinguishable from natural human conversation. " +
+            "These models capture subtle prosodic patterns, breathing rhythms, and emotional " +
+            "inflections that bring synthesized voices to life. Azure HD Neural Voice, built on " +
+            "Microsoft's latest Dragon neural architecture, represents the cutting edge of this " +
+            "technology, delivering studio-quality audio with remarkably low latency through a " +
+            "streaming architecture that begins delivering audio within milliseconds of receiving " +
+            "the synthesis request, long before the full audio has been generated server-side.";
 
         static async Task<int> Main(string[] args)
         {
@@ -112,13 +120,27 @@ namespace AzureTTSStreaming
             using var audioConfig = AudioConfig.FromStreamOutput(pullStream);
             using var synthesizer = new SpeechSynthesizer(speechConfig, audioConfig);
 
+            // Latency tracking.
+            var requestStart = System.Diagnostics.Stopwatch.StartNew();
+            long ttfabMs = -1;  // time-to-first-audio-byte
+            bool firstChunk = true;
+
             // Subscribe to events for progress reporting.
-            synthesizer.SynthesisStarted   += (_, e) => Console.WriteLine("[Event] Synthesis started.");
-            synthesizer.Synthesizing       += (_, e) => Console.Write($"\r[Event] Received {e.Result.AudioData.Length,7} bytes so far…   ");
+            synthesizer.SynthesisStarted   += (_, e) => Console.WriteLine($"[{requestStart.ElapsedMilliseconds,6} ms] Synthesis started.");
+            synthesizer.Synthesizing       += (_, e) =>
+            {
+                if (firstChunk)
+                {
+                    ttfabMs = requestStart.ElapsedMilliseconds;
+                    firstChunk = false;
+                    Console.WriteLine($"[{ttfabMs,6} ms] First audio chunk received (TTFAB = {ttfabMs} ms).");
+                }
+                Console.Write($"\r[{requestStart.ElapsedMilliseconds,6} ms] Received {e.Result.AudioData.Length,7} bytes so far…   ");
+            };
             synthesizer.SynthesisCompleted += (_, e) =>
             {
                 Console.WriteLine();
-                Console.WriteLine($"[Event] Synthesis completed.  Total audio bytes: {e.Result.AudioData.Length}");
+                Console.WriteLine($"[{requestStart.ElapsedMilliseconds,6} ms] Synthesis completed. Total audio bytes: {e.Result.AudioData.Length}");
             };
             synthesizer.SynthesisCanceled  += (_, e) =>
             {
@@ -130,6 +152,8 @@ namespace AzureTTSStreaming
             // audio data is available through AudioDataStream before synthesis ends.
             Console.WriteLine("Starting streaming synthesis …");
             using var result = await synthesizer.StartSpeakingSsmlAsync(ssml);
+            long startReturnMs = requestStart.ElapsedMilliseconds;
+            Console.WriteLine($"[{startReturnMs,6} ms] StartSpeakingSsmlAsync returned (request-to-stream-open latency = {startReturnMs} ms).");
 
             if (result.Reason == ResultReason.Canceled)
             {
@@ -159,6 +183,15 @@ namespace AzureTTSStreaming
 
             Console.WriteLine();
             Console.WriteLine($"Done. Saved {totalBytes} bytes to '{outputPath}'.");
+
+            // --- Latency summary ---
+            long totalMs = requestStart.ElapsedMilliseconds;
+            Console.WriteLine();
+            Console.WriteLine("=== Latency Summary ===");
+            Console.WriteLine($"  Time-to-first-audio-byte (TTFAB) : {(ttfabMs >= 0 ? ttfabMs + " ms" : "n/a")}");
+            Console.WriteLine($"  Total synthesis + write time      : {totalMs} ms");
+            Console.WriteLine($"  Audio size                        : {totalBytes} bytes");
+            Console.WriteLine("=======================");
             return 0;
         }
 
