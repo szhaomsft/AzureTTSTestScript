@@ -6,3 +6,6 @@ __pycache__/
 # .NET build output
 bin/
 obj/
+
+# Generated audio files
+*.wav
