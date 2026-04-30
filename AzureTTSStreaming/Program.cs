@@ -186,17 +186,19 @@ namespace AzureTTSStreaming
 
                 byte[] buffer = new byte[8192];
                 uint totalBytes = 0;
+                Console.Write($"  Iteration {iter}: receiving …");
                 while (true)
                 {
                     uint bytesRead = dataStream.ReadData(buffer);
                     if (bytesRead == 0) break;
                     await fileStream.WriteAsync(buffer.AsMemory(0, (int)bytesRead));
                     totalBytes += bytesRead;
+                    Console.Write($"\r  Iteration {iter}: received {totalBytes,8} bytes …   ");
                 }
 
                 long totalMs = requestStart.ElapsedMilliseconds;
                 results.Add((iter, ttfabMs, totalMs, totalBytes));
-                Console.WriteLine($"  Iteration {iter}: TTFAB = {(ttfabMs >= 0 ? ttfabMs + " ms" : "n/a"),-10}  Total = {totalMs,6} ms  Audio = {totalBytes,8} bytes  → {iterPath}");
+                Console.WriteLine($"\r  Iteration {iter}: TTFAB = {(ttfabMs >= 0 ? ttfabMs + " ms" : "n/a"),-10}  Total = {totalMs,6} ms  Audio = {totalBytes,8} bytes  → {iterPath}");
             }
 
             // --- Summary table ---
