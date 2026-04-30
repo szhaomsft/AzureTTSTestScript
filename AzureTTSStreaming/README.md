@@ -38,6 +38,13 @@ dotnet run -- \
 dotnet run -- --key <YOUR_KEY> --region <YOUR_REGION> --output -
 ```
 
+# Run 5 iterations with a warm synthesizer to measure steady-state latency
+dotnet run -- --key <YOUR_KEY> --region eastus --iterations 5
+```
+
+Output files are named `output_1.wav`, `output_2.wav`, … when iterations > 1.
+A summary table with per-iteration TTFAB, total time, and avg/min/max is printed at the end.
+
 On Windows, replace the line-continuation `\` with `^`.
 
 ---
@@ -64,6 +71,7 @@ This is in contrast to `SpeakSsmlAsync`, which blocks until **all** audio has be
 | `--locale` | `en-US` | BCP-47 locale for the SSML `xml:lang` attribute |
 | `--text` | *(built-in sample)* | Text to synthesize |
 | `--output` | `output.wav` | Output WAV path; use `-` for speaker playback |
+| `--iterations` | `1` | Number of synthesis iterations. Uses a warm (reused) synthesizer to measure steady-state latency. |
 
 ---
 

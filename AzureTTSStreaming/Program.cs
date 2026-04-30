@@ -60,6 +60,7 @@ namespace AzureTTSStreaming
                     case "--locale": locale = Next(args, ref i); break;
                     case "--text":   text   = Next(args, ref i); break;
                     case "--output": output = Next(args, ref i); break;
+                    case "--iterations": Next(args, ref i); break; // parsed later
                     case "--help":
                     case "-h":
                         PrintUsage();
@@ -98,9 +99,20 @@ namespace AzureTTSStreaming
             Console.WriteLine($"Output : {(writeToFile ? output : "<speaker>")}");
             Console.WriteLine();
 
+            // --- Parse iteration count (--iterations N) ---
+            int iterations = 1;
+            for (int j = 0; j < args.Length; j++)
+            {
+                if (args[j] == "--iterations" && j + 1 < args.Length)
+                {
+                    iterations = int.Parse(args[j + 1]);
+                    break;
+                }
+            }
+
             if (writeToFile)
             {
-                return await SynthesizeToFileAsync(speechConfig, ssml, output);
+                return await SynthesizeToFileAsync(speechConfig, ssml, output, iterations);
             }
             else
             {
@@ -112,86 +124,100 @@ namespace AzureTTSStreaming
         // Streaming synthesis → WAV file
         // -------------------------------------------------------------------------
         private static async Task<int> SynthesizeToFileAsync(
-            SpeechConfig speechConfig, string ssml, string outputPath)
+            SpeechConfig speechConfig, string ssml, string outputPath, int iterations)
         {
-            // Use a pull-audio-output stream so we can intercept raw PCM bytes as
-            // they arrive from the service without going through a speaker device.
             using var pullStream = AudioOutputStream.CreatePullStream();
             using var audioConfig = AudioConfig.FromStreamOutput(pullStream);
             using var synthesizer = new SpeechSynthesizer(speechConfig, audioConfig);
 
-            // Latency tracking.
-            var requestStart = System.Diagnostics.Stopwatch.StartNew();
-            long ttfabMs = -1;  // time-to-first-audio-byte
+            // Shared latency tracking state (reset per iteration).
+            var requestStart = new System.Diagnostics.Stopwatch();
+            long ttfabMs = -1;
             bool firstChunk = true;
 
-            // Subscribe to events for progress reporting.
-            synthesizer.SynthesisStarted   += (_, e) => Console.WriteLine($"[{requestStart.ElapsedMilliseconds,6} ms] Synthesis started.");
-            synthesizer.Synthesizing       += (_, e) =>
+            synthesizer.SynthesisStarted += (_, e) => { /* quiet */ };
+            synthesizer.Synthesizing += (_, e) =>
             {
                 if (firstChunk)
                 {
                     ttfabMs = requestStart.ElapsedMilliseconds;
                     firstChunk = false;
-                    Console.WriteLine($"[{ttfabMs,6} ms] First audio chunk received (TTFAB = {ttfabMs} ms).");
                 }
-                Console.Write($"\r[{requestStart.ElapsedMilliseconds,6} ms] Received {e.Result.AudioData.Length,7} bytes so far…   ");
             };
-            synthesizer.SynthesisCompleted += (_, e) =>
-            {
-                Console.WriteLine();
-                Console.WriteLine($"[{requestStart.ElapsedMilliseconds,6} ms] Synthesis completed. Total audio bytes: {e.Result.AudioData.Length}");
-            };
-            synthesizer.SynthesisCanceled  += (_, e) =>
+            synthesizer.SynthesisCompleted += (_, e) => { /* quiet */ };
+            synthesizer.SynthesisCanceled += (_, e) =>
             {
                 var detail = SpeechSynthesisCancellationDetails.FromResult(e.Result);
-                Console.Error.WriteLine($"[Event] Synthesis cancelled: {detail.Reason} — {detail.ErrorDetails}");
+                Console.Error.WriteLine($"  Synthesis cancelled: {detail.Reason} — {detail.ErrorDetails}");
             };
 
-            // StartSpeakingSsmlAsync returns as soon as the service begins streaming;
-            // audio data is available through AudioDataStream before synthesis ends.
-            Console.WriteLine("Starting streaming synthesis …");
-            using var result = await synthesizer.StartSpeakingSsmlAsync(ssml);
-            long startReturnMs = requestStart.ElapsedMilliseconds;
-            Console.WriteLine($"[{startReturnMs,6} ms] StartSpeakingSsmlAsync returned (request-to-stream-open latency = {startReturnMs} ms).");
+            // Collect per-iteration results for the summary table.
+            var results = new List<(int Iter, long TtfabMs, long TotalMs, uint AudioBytes)>();
 
-            if (result.Reason == ResultReason.Canceled)
+            Console.WriteLine($"Running {iterations} iteration(s) with a warm (reused) synthesizer …");
+            Console.WriteLine();
+
+            for (int iter = 1; iter <= iterations; iter++)
             {
-                var detail = SpeechSynthesisCancellationDetails.FromResult(result);
-                Console.Error.WriteLine($"Synthesis failed: {detail.Reason} — {detail.ErrorDetails}");
-                return 1;
+                // Reset per-iteration state.
+                ttfabMs = -1;
+                firstChunk = true;
+                requestStart.Restart();
+
+                using var result = await synthesizer.StartSpeakingSsmlAsync(ssml);
+                long startReturnMs = requestStart.ElapsedMilliseconds;
+
+                if (result.Reason == ResultReason.Canceled)
+                {
+                    var detail = SpeechSynthesisCancellationDetails.FromResult(result);
+                    Console.Error.WriteLine($"  Iteration {iter}: Synthesis failed: {detail.Reason} — {detail.ErrorDetails}");
+                    return 1;
+                }
+
+                // Drain audio to file.
+                string iterPath = iterations == 1
+                    ? outputPath
+                    : Path.Combine(
+                        Path.GetDirectoryName(outputPath) ?? ".",
+                        $"{Path.GetFileNameWithoutExtension(outputPath)}_{iter}{Path.GetExtension(outputPath)}");
+
+                using var dataStream = AudioDataStream.FromResult(result);
+                using var fileStream = new FileStream(iterPath, FileMode.Create, FileAccess.Write);
+
+                byte[] buffer = new byte[8192];
+                uint totalBytes = 0;
+                while (true)
+                {
+                    uint bytesRead = dataStream.ReadData(buffer);
+                    if (bytesRead == 0) break;
+                    await fileStream.WriteAsync(buffer.AsMemory(0, (int)bytesRead));
+                    totalBytes += bytesRead;
+                }
+
+                long totalMs = requestStart.ElapsedMilliseconds;
+                results.Add((iter, ttfabMs, totalMs, totalBytes));
+                Console.WriteLine($"  Iteration {iter}: TTFAB = {(ttfabMs >= 0 ? ttfabMs + " ms" : "n/a"),-10}  Total = {totalMs,6} ms  Audio = {totalBytes,8} bytes  → {iterPath}");
             }
 
-            // Drain the audio data stream, writing chunks to the output file.
-            using var dataStream = AudioDataStream.FromResult(result);
-            using var fileStream = new FileStream(outputPath, FileMode.Create, FileAccess.Write);
+            // --- Summary table ---
+            Console.WriteLine();
+            Console.WriteLine("=== Latency Summary (warm synthesizer) ===");
+            Console.WriteLine($"  {"Iter",-6} {"TTFAB (ms)",12} {"Total (ms)",12} {"Audio (bytes)",14}");
+            Console.WriteLine($"  {"----",-6} {"----------",12} {"----------",12} {"--------------",14}");
+            foreach (var r in results)
+                Console.WriteLine($"  {r.Iter,-6} {(r.TtfabMs >= 0 ? r.TtfabMs.ToString() : "n/a"),12} {r.TotalMs,12} {r.AudioBytes,14}");
 
-            byte[] buffer = new byte[8192];
-            uint totalBytes = 0;
-
-            Console.WriteLine($"Streaming audio to '{outputPath}' …");
-            while (true)
+            if (results.Count > 1)
             {
-                uint bytesRead = dataStream.ReadData(buffer);
-                if (bytesRead == 0)
-                    break;
-
-                await fileStream.WriteAsync(buffer.AsMemory(0, (int)bytesRead));
-                totalBytes += bytesRead;
-                Console.Write($"\r  Written {totalBytes,8} bytes …   ");
+                var valid = results.Where(r => r.TtfabMs >= 0).ToList();
+                if (valid.Count > 0)
+                {
+                    Console.WriteLine($"  {"avg",-6} {valid.Average(r => r.TtfabMs),12:F0} {results.Average(r => r.TotalMs),12:F0} {results.Average(r => r.AudioBytes),14:F0}");
+                    Console.WriteLine($"  {"min",-6} {valid.Min(r => r.TtfabMs),12} {results.Min(r => r.TotalMs),12} {results.Min(r => r.AudioBytes),14}");
+                    Console.WriteLine($"  {"max",-6} {valid.Max(r => r.TtfabMs),12} {results.Max(r => r.TotalMs),12} {results.Max(r => r.AudioBytes),14}");
+                }
             }
-
-            Console.WriteLine();
-            Console.WriteLine($"Done. Saved {totalBytes} bytes to '{outputPath}'.");
-
-            // --- Latency summary ---
-            long totalMs = requestStart.ElapsedMilliseconds;
-            Console.WriteLine();
-            Console.WriteLine("=== Latency Summary ===");
-            Console.WriteLine($"  Time-to-first-audio-byte (TTFAB) : {(ttfabMs >= 0 ? ttfabMs + " ms" : "n/a")}");
-            Console.WriteLine($"  Total synthesis + write time      : {totalMs} ms");
-            Console.WriteLine($"  Audio size                        : {totalBytes} bytes");
-            Console.WriteLine("=======================");
+            Console.WriteLine("===========================================");
             return 0;
         }
 
