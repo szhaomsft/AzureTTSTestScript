@@ -8,5 +8,8 @@ bin/
 obj/
 
 # Generated audio files
+ava_click_noise_check/
 *.wav
+*.mp3
 *.pcm
+*.raw
