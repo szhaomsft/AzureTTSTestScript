@@ -18,7 +18,7 @@ main {
   display: grid;
   gap: 16px;
   margin: 0 auto;
-  max-width: 980px;
+  max-width: 1280px;
   padding: 24px;
 }
 
@@ -47,6 +47,37 @@ label {
   gap: 6px;
   font-weight: 600;
   margin-top: 14px;
+}
+
+.checkbox-label {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  margin-top: 0;
+}
+
+.checkbox-label input {
+  width: auto;
+}
+
+.mode-row,
+.field-grid,
+.comparison-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.mode-row {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  margin-top: 16px;
+}
+
+.field-grid {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.comparison-grid {
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
 }
 
 input,
