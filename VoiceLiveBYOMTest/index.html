@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Voice Live BYOM No-Auth Test</title>
+  </head>
+  <body>
+    <main id="app">
+      <section class="panel">
+        <h1>Voice Live BYOM no-auth chat-completion test</h1>
+        <p class="note">
+          This page uses the Voice Live JavaScript SDK and a local WebSocket proxy that injects only
+          <code>byom-endpoint</code>. It intentionally does not send
+          <code>x-ms-byom-authorization-headers</code>, so the external chat-completion endpoint must accept
+          requests without auth or ignore the SDK's dummy upstream key. Microphone capture starts automatically
+          after connection.
+        </p>
+
+        <label>
+          Voice Live endpoint
+          <input id="voice-live-endpoint" placeholder="https://your-resource.cognitiveservices.azure.com" />
+        </label>
+
+        <label>
+          Voice Live API key
+          <input id="voice-live-api-key" type="password" placeholder="Voice Live resource key" />
+        </label>
+
+        <label>
+          External BYOM endpoint, no auth
+          <input id="byom-endpoint" placeholder="https://your-server.example.com/openai/v1" />
+        </label>
+
+        <label>
+          Model/deployment
+          <input id="model" value="gpt-4.1" />
+        </label>
+
+        <label>
+          Instructions
+          <textarea id="instructions" rows="3">You are a concise assistant. Reply in one short sentence.</textarea>
+        </label>
+
+        <label>
+          User message
+          <textarea id="message" rows="3">Say hello and mention that BYOM chat completion is connected.</textarea>
+        </label>
+
+        <div class="buttons">
+          <button id="connect" type="button">Connect</button>
+          <button id="send" type="button" disabled>Send text</button>
+          <button id="disconnect" type="button" disabled>Disconnect</button>
+          <button id="clear-saved-config" type="button">Clear saved config</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Response</h2>
+        <pre id="response"></pre>
+      </section>
+
+      <section class="panel">
+        <h2>Log</h2>
+        <pre id="log"></pre>
+      </section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

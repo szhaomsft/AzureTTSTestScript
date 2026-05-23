@@ -1,0 +1,5 @@
+{
+  "name": "voice-live-byom-test",
+  "compatibility_date": "2026-05-23",
+  "main": "cloudflare_worker_mock.js"
+}
