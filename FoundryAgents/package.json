@@ -1,0 +1,17 @@
+{
+  "name": "foundry-agent-latency",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "latency": "node foundry-agent-latency.js"
+  },
+  "dependencies": {
+    "@azure/ai-projects": "^2.1.1",
+    "@azure/identity": "^4.13.0",
+    "openai": "^6.39.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
