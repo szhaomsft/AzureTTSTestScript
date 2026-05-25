@@ -8,6 +8,8 @@ const DEFAULT_API_BASE = "https://api.elevenlabs.io";
 const DEFAULT_RUNS = 100;
 const DEFAULT_QUERY = "Hello, please answer with one short sentence.";
 const DEFAULT_TIMEOUT_MS = 60000;
+const DEFAULT_WARMUP_MS = 1000;
+const DEFAULT_INTER_RUN_DELAY_MS = 250;
 
 loadEnvFile();
 
@@ -52,6 +54,8 @@ Options:
   --query <text>        Text query to send. Default: "${DEFAULT_QUERY}"
   --runs <n>            Number of test runs. Default: ${DEFAULT_RUNS}
   --timeout-ms <n>      Timeout per run. Default: ${DEFAULT_TIMEOUT_MS}
+  --warmup-ms <n>       Drain initial session events before first run. Default: ${DEFAULT_WARMUP_MS}
+  --inter-run-delay-ms <n> Drain late events between reused-session runs. Default: ${DEFAULT_INTER_RUN_DELAY_MS}
   --api-base <url>      ElevenLabs API base URL. Default: ${DEFAULT_API_BASE}
   --csv <path>          Write per-run results to a CSV file.
   --random-query        Append a unique random sentence to each query to avoid cache.
@@ -72,6 +76,8 @@ function parseArgs(argv) {
     query: DEFAULT_QUERY,
     runs: DEFAULT_RUNS,
     timeoutMs: DEFAULT_TIMEOUT_MS,
+    warmupMs: DEFAULT_WARMUP_MS,
+    interRunDelayMs: DEFAULT_INTER_RUN_DELAY_MS,
     apiBase: DEFAULT_API_BASE,
     csv: undefined,
     randomQuery: false,
@@ -106,6 +112,12 @@ function parseArgs(argv) {
       case "--timeout-ms":
         args.timeoutMs = parsePositiveInteger(readValue(), "--timeout-ms");
         break;
+      case "--warmup-ms":
+        args.warmupMs = parseNonNegativeInteger(readValue(), "--warmup-ms");
+        break;
+      case "--inter-run-delay-ms":
+        args.interRunDelayMs = parseNonNegativeInteger(readValue(), "--inter-run-delay-ms");
+        break;
       case "--api-base":
         args.apiBase = readValue().replace(/\/+$/, "");
         break;
@@ -137,6 +149,14 @@ function parsePositiveInteger(value, name) {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isInteger(parsed) || parsed <= 0) {
     throw new Error(`${name} must be a positive integer`);
+  }
+
+  function parseNonNegativeInteger(value, name) {
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isInteger(parsed) || parsed < 0) {
+      throw new Error(`${name} must be a non-negative integer`);
+    }
+    return parsed;
   }
   return parsed;
 }
@@ -379,18 +399,37 @@ function isResponseComplete(message) {
   );
 }
 
-async function runSingleConversation({ signedUrl, query, runs, timeoutMs, textOverride, randomQuery }) {
+async function runSingleConversation({
+  signedUrl,
+  query,
+  runs,
+  timeoutMs,
+  textOverride,
+  randomQuery,
+  warmupMs,
+  interRunDelayMs,
+}) {
   const conversation = createConversation({ signedUrl, timeoutMs, textOverride });
   await conversation.ready;
+  if (warmupMs > 0) {
+    await delay(warmupMs);
+  }
 
   try {
     const results = [];
     for (let i = 1; i <= runs; i += 1) {
       results.push(await runOne(conversation, queryForRun(query, i, randomQuery), i));
+      if (i < runs && interRunDelayMs > 0) {
+        await delay(interRunDelayMs);
+      }
     }
     return results;
   } finally {
     conversation.close();
+  }
+
+  function delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }
 
@@ -536,6 +575,8 @@ async function main() {
         timeoutMs: args.timeoutMs,
         textOverride: args.textOverride,
         randomQuery: args.randomQuery,
+        warmupMs: args.warmupMs,
+        interRunDelayMs: args.interRunDelayMs,
       })
     : await runFreshConversations({
         ...args,

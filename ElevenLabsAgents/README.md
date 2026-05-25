@@ -52,6 +52,8 @@ npm.cmd run latency -- --query "Tell me a story." --runs 100 --reuse-session --n
 --query <text>        Text query to send.
 --runs <n>            Number of test runs. Default: 100.
 --timeout-ms <n>      Timeout per run. Default: 60000.
+--warmup-ms <n>       Drain initial session events before first run. Default: 1000.
+--inter-run-delay-ms <n> Drain late events between reused-session runs. Default: 250.
 --api-base <url>      ElevenLabs API base URL. Default: https://api.elevenlabs.io.
 --csv <path>          Write per-run results to a CSV file.
 --random-query        Append a unique random sentence to each query to avoid cache.
