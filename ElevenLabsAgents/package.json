@@ -1,0 +1,15 @@
+{
+  "name": "elevenlabs-agent-latency",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "latency": "node elevenlabs-agent-latency.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
