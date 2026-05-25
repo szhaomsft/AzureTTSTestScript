@@ -13,3 +13,7 @@ ava_click_noise_check/
 *.mp3
 *.pcm
 *.raw
+
+# Node
+node_modules/
+.env

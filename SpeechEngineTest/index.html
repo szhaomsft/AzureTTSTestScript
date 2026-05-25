@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Speech Engine Test</title>
+  </head>
+  <body>
+    <main id="app">
+      <section class="panel">
+        <h1>Speech Engine Test</h1>
+        <p>Config is loaded from <code>.env</code> on the server.</p>
+
+        <label>
+          First message
+          <input id="first-message" value="Hello! How can I help you today?" />
+        </label>
+
+        <div class="buttons">
+          <button id="start" type="button">Start conversation</button>
+          <button id="stop" type="button" disabled>End conversation</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Transcript</h2>
+        <pre id="transcript-output"></pre>
+        <h3>Log</h3>
+        <pre id="log-output"></pre>
+      </section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

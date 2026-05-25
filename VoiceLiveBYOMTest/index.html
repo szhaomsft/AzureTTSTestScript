@@ -3,29 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Voice Live BYOM No-Auth Test</title>
+    <title>Voice Live BYOM Test</title>
   </head>
   <body>
     <main id="app">
       <section class="panel">
-        <h1>Voice Live BYOM / ElevenLabs Speech Engine test</h1>
-        <p class="note">
-          Voice Live uses the JavaScript SDK and the local WebSocket proxy. Speech Engine uses the ElevenLabs
-          Speech Engine session API; the local Node server attaches the Speech Engine WebSocket and forwards
-          Speech Engine transcripts to the same mock chat-completions endpoint. Running both at once can feed
-          speaker audio back into the microphone; use headphones for comparison.
-        </p>
-
-        <div class="mode-row">
-          <label class="checkbox-label">
-            <input id="enable-voice-live" type="checkbox" checked />
-            Enable Voice Live
-          </label>
-          <label class="checkbox-label">
-            <input id="enable-speech-engine" type="checkbox" />
-            Enable Speech Engine
-          </label>
-        </div>
+        <h1>Voice Live BYOM No-Auth Test</h1>
 
         <label>
           Voice Live endpoint
@@ -57,30 +40,6 @@
           <textarea id="message" rows="3">Say hello and mention that BYOM chat completion is connected.</textarea>
         </label>
 
-        <div class="field-grid">
-          <label>
-            ElevenLabs API key
-            <input id="elevenlabs-api-key" type="password" placeholder="ElevenLabs API key for Speech Engine" />
-          </label>
-
-          <label>
-            ElevenLabs Speech Engine ID
-            <input id="elevenlabs-speech-engine-id" placeholder="Speech Engine / agent ID" />
-          </label>
-
-          <label>
-            Speech Engine first message
-            <input id="elevenlabs-first-message" value="Hello, I am connected through Speech Engine." />
-          </label>
-
-          <label>
-            Speech Engine input device
-            <select id="elevenlabs-input-device">
-              <option value="">Default microphone</option>
-            </select>
-          </label>
-        </div>
-
         <div class="buttons">
           <button id="connect" type="button">Connect</button>
           <button id="send" type="button" disabled>Send text</button>
@@ -89,20 +48,11 @@
         </div>
       </section>
 
-      <section class="comparison-grid">
-        <div class="panel">
-          <h2>Voice Live response</h2>
-          <pre id="voice-live-response"></pre>
-          <h3>Voice Live log</h3>
-          <pre id="voice-live-log"></pre>
-        </div>
-
-        <div class="panel">
-          <h2>Speech Engine response</h2>
-          <pre id="speech-engine-response"></pre>
-          <h3>Speech Engine log</h3>
-          <pre id="speech-engine-log"></pre>
-        </div>
+      <section class="panel">
+        <h2>Voice Live response</h2>
+        <pre id="voice-live-response"></pre>
+        <h3>Voice Live log</h3>
+        <pre id="voice-live-log"></pre>
       </section>
     </main>
     <script type="module" src="/src/main.ts"></script>

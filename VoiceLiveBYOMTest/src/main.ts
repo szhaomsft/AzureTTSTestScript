@@ -6,14 +6,11 @@ import {
   type VoiceLiveSession,
 } from "@azure/ai-voicelive";
 import { AzureKeyCredential } from "@azure/core-auth";
-import { Conversation, type Conversation as ElevenConversation } from "@elevenlabs/client";
 
 import "./style.css";
 
 let voiceLiveSession: VoiceLiveSession | undefined;
-let speechEngineConversation: ElevenConversation | undefined;
 let voiceLiveResponseText = "";
-let speechEngineResponseText = "";
 let inputAudioContext: AudioContext | undefined;
 let mediaStream: MediaStream | undefined;
 let mediaSource: MediaStreamAudioSourceNode | undefined;
@@ -21,22 +18,14 @@ let audioProcessor: ScriptProcessorNode | undefined;
 let playbackAudioContext: AudioContext | undefined;
 let nextPlaybackTime = 0;
 let playbackStartLogged = false;
-let speechEngineMicTraceTimer: number | undefined;
 
 const activePlaybackSources = new Set<AudioBufferSourceNode>();
 
-// localStorage key for BYOM test form settings restored across browser reloads.
 const CONFIG_STORAGE_KEY = "voice-live-byom-test-config";
-// Voice Live expects PCM16 microphone chunks at 24 kHz for this test session.
 const TARGET_SAMPLE_RATE = 24_000;
-// Voice Live returns PCM16 audio at 24 kHz for this test session.
 const OUTPUT_SAMPLE_RATE = 24_000;
-// Browser ScriptProcessor buffer size used to batch microphone samples before resampling.
 const AUDIO_PROCESSOR_BUFFER_SIZE = 4096;
-// Clamp threshold for Float32 microphone samples before PCM16 conversion.
 const PCM_SAMPLE_LIMIT = 1;
-// Interval for polling ElevenLabs client-side microphone volume diagnostics.
-const SPEECH_ENGINE_MIC_TRACE_INTERVAL_MS = 1000;
 
 const TEXT_CONFIG_FIELD_IDS = [
   "voice-live-endpoint",
@@ -45,65 +34,41 @@ const TEXT_CONFIG_FIELD_IDS = [
   "model",
   "instructions",
   "message",
-  "elevenlabs-api-key",
-  "elevenlabs-speech-engine-id",
-  "elevenlabs-first-message",
-  "elevenlabs-input-device",
 ] as const;
-const CHECKBOX_CONFIG_FIELD_IDS = ["enable-voice-live", "enable-speech-engine"] as const;
 
 type TextConfigFieldId = (typeof TEXT_CONFIG_FIELD_IDS)[number];
-type CheckboxConfigFieldId = (typeof CHECKBOX_CONFIG_FIELD_IDS)[number];
-type SavedConfig = Partial<Record<TextConfigFieldId, string> & Record<CheckboxConfigFieldId, boolean>>;
+type SavedConfig = Partial<Record<TextConfigFieldId, string>>;
 
 const connectButton = getElement<HTMLButtonElement>("connect");
 const sendButton = getElement<HTMLButtonElement>("send");
 const disconnectButton = getElement<HTMLButtonElement>("disconnect");
 const clearSavedConfigButton = getElement<HTMLButtonElement>("clear-saved-config");
-const speechEngineInputDeviceSelect = getElement<HTMLSelectElement>("elevenlabs-input-device");
 const voiceLiveResponseOutput = getElement<HTMLPreElement>("voice-live-response");
-const speechEngineResponseOutput = getElement<HTMLPreElement>("speech-engine-response");
 const voiceLiveLogOutput = getElement<HTMLPreElement>("voice-live-log");
-const speechEngineLogOutput = getElement<HTMLPreElement>("speech-engine-log");
 
 restoreSavedConfig();
 setupConfigPersistence();
-void refreshInputDevices();
 
 connectButton.addEventListener("click", () => {
-  connect().catch((error: unknown) => logSelectedEngineError("Connect failed", error));
+  connect().catch((error: unknown) => logVoiceLiveError("Connect failed", error));
 });
 
 sendButton.addEventListener("click", () => {
-  sendText().catch((error: unknown) => logSelectedEngineError("Send failed", error));
+  sendText().catch((error: unknown) => logVoiceLiveError("Send failed", error));
 });
 
 disconnectButton.addEventListener("click", () => {
-  disconnect().catch((error: unknown) => logSelectedEngineError("Disconnect failed", error));
+  disconnect().catch((error: unknown) => logVoiceLiveError("Disconnect failed", error));
 });
 
 clearSavedConfigButton.addEventListener("click", () => {
   localStorage.removeItem(CONFIG_STORAGE_KEY);
-  logBoth("Saved config cleared.");
+  logVoiceLive("Saved config cleared.");
 });
 
 async function connect(): Promise<void> {
-  const voiceLiveEnabled = getCheckboxValue("enable-voice-live");
-  const speechEngineEnabled = getCheckboxValue("enable-speech-engine");
-  if (!voiceLiveEnabled && !speechEngineEnabled) {
-    throw new Error("Enable Voice Live, Speech Engine, or both.");
-  }
-
-  if (voiceLiveEnabled) {
-    await connectVoiceLive();
-  }
-  if (speechEngineEnabled) {
-    await connectSpeechEngine();
-  }
-
-  if (voiceLiveEnabled) {
-    await startMicrophone();
-  }
+  await connectVoiceLive();
+  await startMicrophone();
   connectButton.disabled = true;
   sendButton.disabled = false;
   disconnectButton.disabled = false;
@@ -188,108 +153,12 @@ async function connectVoiceLive(): Promise<void> {
   });
 }
 
-function validateSpeechEngineConfig(): void {
-  const requiredFields = ["byom-endpoint", "model", "elevenlabs-api-key", "elevenlabs-speech-engine-id"];
-  const missingFields = requiredFields.filter((fieldId) => !getInputValue(fieldId));
-  if (missingFields.length > 0) {
-    throw new Error(`Speech Engine requires: ${missingFields.join(", ")}`);
-  }
-}
-
-async function connectSpeechEngine(): Promise<void> {
-  validateSpeechEngineConfig();
-  const micPreflightStart = performance.now();
-  logSpeechEngine("Checking microphone access for ElevenLabs...");
-  await preflightSpeechEngineMicrophone();
-  logSpeechEngine(`Microphone access check completed in ${formatDurationMs(performance.now() - micPreflightStart)}`);
-
-  const tokenUrl = getWorkerEndpointUrl(getInputValue("byom-endpoint"), "/speech-engine/token");
-  const tokenStart = performance.now();
-  logSpeechEngine(`Getting Speech Engine token from Cloudflare Worker: ${tokenUrl}`);
-  const tokenResponse = await fetch(tokenUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      apiKey: getInputValue("elevenlabs-api-key"),
-      speechEngineId: getInputValue("elevenlabs-speech-engine-id"),
-    }),
-  });
-  const tokenPayload = (await tokenResponse.json()) as { token?: string; error?: string };
-  if (!tokenResponse.ok || !tokenPayload.token) {
-    throw new Error(tokenPayload.error || "Failed to get Speech Engine token.");
-  }
-  logSpeechEngine(`Speech Engine token fetched in ${formatDurationMs(performance.now() - tokenStart)}`);
-
-  const startSessionStart = performance.now();
-  logSpeechEngine("Starting ElevenLabs Conversation session...");
-  speechEngineConversation = await Conversation.startSession({
-    conversationToken: tokenPayload.token,
-    inputDeviceId: getInputValue("elevenlabs-input-device") || undefined,
-    overrides: { agent: { firstMessage: getInputValue("elevenlabs-first-message") } },
-    onConnect: () => logSpeechEngine("connected"),
-    onDisconnect: (details) => {
-      logSpeechEngine(`disconnected: ${JSON.stringify(details)}`);
-      speechEngineConversation = undefined;
-      stopSpeechEngineMicTrace();
-    },
-    onError: (message, context) => logSpeechEngineTrace("error", { message, context }),
-    onMessage: ({ source, message }) => handleSpeechEngineMessage(source, message),
-    onStatusChange: (event) => logSpeechEngineTrace("status", event),
-    onModeChange: (event) => logSpeechEngineTrace("mode", event),
-    onVadScore: (event) => logSpeechEngineTrace("vad", event),
-    onInterruption: (event) => logSpeechEngineTrace("interruption", event),
-    onConversationMetadata: (event) => logSpeechEngineTrace("metadata", event),
-    onAsrInitiationMetadata: (event) => logSpeechEngineTrace("asr_init", event),
-    onAudio: (audio) => logSpeechEngineTrace("audio", { base64Bytes: audio.length }),
-    onDebug: (event) => logSpeechEngineTrace("debug", event),
-  });
-  speechEngineConversation.setMicMuted(false);
-  logSpeechEngine("Speech Engine mic explicitly unmuted.");
-  startSpeechEngineMicTrace();
-  logSpeechEngine(`Conversation.startSession resolved in ${formatDurationMs(performance.now() - startSessionStart)}`);
-}
-
-async function preflightSpeechEngineMicrophone(): Promise<void> {
-  if (!navigator.mediaDevices?.getUserMedia) {
-    throw new Error("Microphone access is not available in this browser.");
-  }
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  for (const track of stream.getTracks()) {
-    track.stop();
-  }
-}
-
-async function refreshInputDevices(): Promise<void> {
-  if (!navigator.mediaDevices?.enumerateDevices) {
-    logSpeechEngine("Input device enumeration is not available in this browser.");
-    return;
-  }
-
-  await preflightSpeechEngineMicrophone().catch(() => undefined);
-  const selectedDeviceId = getInputValue("elevenlabs-input-device");
-  const devices = await navigator.mediaDevices.enumerateDevices();
-  const audioInputs = devices.filter((device) => device.kind === "audioinput");
-  speechEngineInputDeviceSelect.replaceChildren(new Option("Default microphone", ""));
-  for (const device of audioInputs) {
-    speechEngineInputDeviceSelect.add(new Option(device.label || `Microphone ${speechEngineInputDeviceSelect.length}`, device.deviceId));
-  }
-  speechEngineInputDeviceSelect.value = selectedDeviceId;
-  logSpeechEngine(`Found ${audioInputs.length} microphone input device(s).`);
-}
-
 async function sendText(): Promise<void> {
   const text = getInputValue("message");
   if (!text) {
     throw new Error("User message is required.");
   }
-
-  if (voiceLiveSession) {
-    await sendVoiceLiveText(text);
-  }
-  if (speechEngineConversation) {
-    logSpeechEngine(`user: ${text}`);
-    speechEngineConversation.sendUserMessage(text);
-  }
+  await sendVoiceLiveText(text);
 }
 
 async function sendVoiceLiveText(text: string): Promise<void> {
@@ -309,15 +178,8 @@ async function sendVoiceLiveText(text: string): Promise<void> {
 }
 
 async function disconnect(): Promise<void> {
-  const hadVoiceLiveSession = Boolean(voiceLiveSession);
-  const hadSpeechEngineConversation = Boolean(speechEngineConversation);
   await stopMicrophone();
   await stopVoiceLivePlayback();
-  if (speechEngineConversation) {
-    await speechEngineConversation.endSession();
-    speechEngineConversation = undefined;
-  }
-  stopSpeechEngineMicTrace();
   if (voiceLiveSession) {
     await voiceLiveSession.disconnect();
     voiceLiveSession = undefined;
@@ -326,32 +188,7 @@ async function disconnect(): Promise<void> {
   connectButton.disabled = false;
   sendButton.disabled = true;
   disconnectButton.disabled = true;
-  if (hadVoiceLiveSession) {
-    logVoiceLive("Disconnected.");
-  }
-  if (hadSpeechEngineConversation) {
-    logSpeechEngine("Disconnected.");
-  }
-}
-
-function startSpeechEngineMicTrace(): void {
-  stopSpeechEngineMicTrace();
-  speechEngineMicTraceTimer = window.setInterval(() => {
-    if (!speechEngineConversation) {
-      return;
-    }
-    const inputVolume = speechEngineConversation.getInputVolume();
-    const outputVolume = speechEngineConversation.getOutputVolume();
-    logSpeechEngineTrace("local_audio_levels", { inputVolume, outputVolume });
-  }, SPEECH_ENGINE_MIC_TRACE_INTERVAL_MS);
-}
-
-function stopSpeechEngineMicTrace(): void {
-  if (speechEngineMicTraceTimer === undefined) {
-    return;
-  }
-  window.clearInterval(speechEngineMicTraceTimer);
-  speechEngineMicTraceTimer = undefined;
+  logVoiceLive("Disconnected.");
 }
 
 async function startMicrophone(): Promise<void> {
@@ -365,7 +202,7 @@ async function startMicrophone(): Promise<void> {
   audioProcessor.onaudioprocess = (event) => sendMicrophoneFrame(event.inputBuffer.getChannelData(0));
   mediaSource.connect(audioProcessor);
   audioProcessor.connect(inputAudioContext.destination);
-  logVoiceLive(`Microphone streaming started (${inputAudioContext.sampleRate} Hz). Use headphones when running both engines.`);
+  logVoiceLive(`Microphone streaming started (${inputAudioContext.sampleRate} Hz).`);
 }
 
 async function stopMicrophone(): Promise<void> {
@@ -466,28 +303,6 @@ async function stopVoiceLivePlayback(): Promise<void> {
   nextPlaybackTime = 0;
 }
 
-function handleSpeechEngineMessage(role: string, message: string): void {
-  const text = message.trim();
-  if (!text) {
-    return;
-  }
-  if (role === "user") {
-    logSpeechEngine(`user transcript: ${text}`);
-    return;
-  }
-
-  speechEngineResponseText = text;
-  speechEngineResponseOutput.textContent = speechEngineResponseText;
-  logSpeechEngine(`assistant output: ${speechEngineResponseText}`);
-}
-
-function getWorkerEndpointUrl(baseEndpoint: string, path: string): string {
-  const url = new URL(baseEndpoint);
-  url.pathname = path;
-  url.search = "";
-  return url.toString();
-}
-
 function getElement<T extends HTMLElement>(id: string): T {
   const element = document.getElementById(id);
   if (!element) {
@@ -501,10 +316,6 @@ function getInputValue(id: string): string {
   return element.value.trim();
 }
 
-function getCheckboxValue(id: CheckboxConfigFieldId): boolean {
-  return getElement<HTMLInputElement>(id).checked;
-}
-
 function restoreSavedConfig(): void {
   const savedConfig = readSavedConfig();
   for (const fieldId of TEXT_CONFIG_FIELD_IDS) {
@@ -513,20 +324,11 @@ function restoreSavedConfig(): void {
       getElement<HTMLInputElement | HTMLTextAreaElement>(fieldId).value = savedValue;
     }
   }
-  for (const fieldId of CHECKBOX_CONFIG_FIELD_IDS) {
-    const savedValue = savedConfig[fieldId];
-    if (savedValue !== undefined) {
-      getElement<HTMLInputElement>(fieldId).checked = savedValue;
-    }
-  }
 }
 
 function setupConfigPersistence(): void {
   for (const fieldId of TEXT_CONFIG_FIELD_IDS) {
     getElement<HTMLInputElement | HTMLTextAreaElement>(fieldId).addEventListener("input", saveCurrentConfig);
-  }
-  for (const fieldId of CHECKBOX_CONFIG_FIELD_IDS) {
-    getElement<HTMLInputElement>(fieldId).addEventListener("change", saveCurrentConfig);
   }
 }
 
@@ -534,9 +336,6 @@ function saveCurrentConfig(): void {
   const config: SavedConfig = {};
   for (const fieldId of TEXT_CONFIG_FIELD_IDS) {
     config[fieldId] = getElement<HTMLInputElement | HTMLTextAreaElement>(fieldId).value;
-  }
-  for (const fieldId of CHECKBOX_CONFIG_FIELD_IDS) {
-    config[fieldId] = getElement<HTMLInputElement>(fieldId).checked;
   }
   localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config));
 }
@@ -553,8 +352,7 @@ function readSavedConfig(): SavedConfig {
       return {};
     }
     return parsedConfig;
-  } catch (error) {
-    logSystemError("Ignoring invalid saved config", error);
+  } catch {
     return {};
   }
 }
@@ -565,34 +363,14 @@ function isSavedConfig(value: unknown): value is SavedConfig {
   }
 
   const candidate = value as Record<string, unknown>;
-  const validTextFields = TEXT_CONFIG_FIELD_IDS.every((fieldId) => {
+  return TEXT_CONFIG_FIELD_IDS.every((fieldId) => {
     const fieldValue = candidate[fieldId];
     return fieldValue === undefined || typeof fieldValue === "string";
   });
-  const validCheckboxFields = CHECKBOX_CONFIG_FIELD_IDS.every((fieldId) => {
-    const fieldValue = candidate[fieldId];
-    return fieldValue === undefined || typeof fieldValue === "boolean";
-  });
-  return validTextFields && validCheckboxFields;
-}
-
-function logBoth(message: string): void {
-  logVoiceLive(message);
-  logSpeechEngine(message);
 }
 
 function logVoiceLive(message: string): void {
   appendLog(voiceLiveLogOutput, message);
-}
-
-function logSpeechEngine(message: string): void {
-  appendLog(speechEngineLogOutput, message);
-}
-
-function logSpeechEngineTrace(eventName: string, payload: unknown): void {
-  const message = `trace.${eventName}: ${safeStringify(payload)}`;
-  logSpeechEngine(message);
-  console.log(`[ElevenLabs Speech Engine] ${eventName}`, payload);
 }
 
 function appendLog(target: HTMLPreElement, message: string): void {
@@ -600,30 +378,8 @@ function appendLog(target: HTMLPreElement, message: string): void {
   target.scrollTop = target.scrollHeight;
 }
 
-function formatDurationMs(durationMs: number): string {
-  return `${Math.round(durationMs)} ms`;
-}
-
 function logVoiceLiveError(message: string, error: unknown): void {
   logVoiceLive(`${message}: ${formatError(error)}`);
-  console.error(message, error);
-}
-
-function logSystemError(message: string, error: unknown): void {
-  const detail = formatError(error);
-  logVoiceLive(`${message}: ${detail}`);
-  logSpeechEngine(`${message}: ${detail}`);
-  console.error(message, error);
-}
-
-function logSelectedEngineError(message: string, error: unknown): void {
-  const detail = formatError(error);
-  if (getCheckboxValue("enable-voice-live")) {
-    logVoiceLive(`${message}: ${detail}`);
-  }
-  if (getCheckboxValue("enable-speech-engine")) {
-    logSpeechEngine(`${message}: ${detail}`);
-  }
   console.error(message, error);
 }
 
@@ -632,12 +388,4 @@ function formatError(error: unknown): string {
     return error.message === "[object Object]" ? error.name : `${error.name}: ${error.message}`;
   }
   return JSON.stringify(error);
-}
-
-function safeStringify(value: unknown): string {
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
 }

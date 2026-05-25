@@ -4,17 +4,16 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "start": "powershell -ExecutionPolicy Bypass -File start.ps1",
     "dev": "node server.mjs",
     "mock-api": "python local_chat_completion_api.py",
-    "speech-engine:create": "python create_speech_engine.py",
+    "tunnel": "powershell -ExecutionPolicy Bypass -File start_tunnel.ps1",
     "build": "tsc && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
     "@azure/ai-voicelive": "1.0.0-beta.3",
     "@azure/core-auth": "^1.10.0",
-    "@elevenlabs/client": "^0.7.0",
-    "@elevenlabs/elevenlabs-js": "^2.49.1",
     "vite": "^7.3.1",
     "ws": "^8.18.3"
   },
