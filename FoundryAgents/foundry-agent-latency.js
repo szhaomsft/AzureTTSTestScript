@@ -4,6 +4,7 @@ import { performance } from "node:perf_hooks";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { AIProjectClient } from "@azure/ai-projects";
 import { DefaultAzureCredential } from "@azure/identity";
+import OpenAI from "openai";
 
 const DEFAULT_RUNS = 100;
 const DEFAULT_QUERY = "Hello, please answer with one short sentence.";
@@ -49,6 +50,7 @@ function usage() {
 
 Options:
   --endpoint <url>       Foundry project endpoint. Defaults to FOUNDRY_PROJECT_ENDPOINT or AZURE_EXISTING_AIPROJECT_ENDPOINT.
+  --api-key <key>        Foundry/OpenAI protocol API key. Defaults to FOUNDRY_API_KEY, AZURE_AI_FOUNDRY_API_KEY, AZURE_AI_API_KEY, AZURE_AI_SERVICES_KEY, AZURE_EXISTING_AIPROJECT_KEY, or AZURE_OPENAI_API_KEY.
   --agent <name-or-id>   Foundry agent name, name:version, or ID. Defaults to FOUNDRY_AGENT or AZURE_EXISTING_AGENT_ID.
   --query <text>         Text query to send. Default: "${DEFAULT_QUERY}"
   --runs <n>             Number of test runs. Default: ${DEFAULT_RUNS}
@@ -69,6 +71,13 @@ Examples:
 function parseArgs(argv) {
   const args = {
     endpoint: process.env.FOUNDRY_PROJECT_ENDPOINT ?? process.env.AZURE_EXISTING_AIPROJECT_ENDPOINT,
+    apiKey:
+      process.env.FOUNDRY_API_KEY ??
+      process.env.AZURE_AI_FOUNDRY_API_KEY ??
+      process.env.AZURE_AI_API_KEY ??
+      process.env.AZURE_AI_SERVICES_KEY ??
+      process.env.AZURE_EXISTING_AIPROJECT_KEY ??
+      process.env.AZURE_OPENAI_API_KEY,
     agent: process.env.FOUNDRY_AGENT ?? process.env.AZURE_EXISTING_AGENT_ID,
     query: DEFAULT_QUERY,
     runs: DEFAULT_RUNS,
@@ -94,6 +103,9 @@ function parseArgs(argv) {
     switch (arg) {
       case "--endpoint":
         args.endpoint = readValue().replace(/\/+$/, "");
+        break;
+      case "--api-key":
+        args.apiKey = readValue();
         break;
       case "--agent":
         args.agent = readValue();
@@ -210,7 +222,22 @@ function parseAgentReference(agentReference) {
   };
 }
 
-function createFoundryClient({ endpoint, agent, allowPreview }) {
+function createFoundryClient({ endpoint, apiKey, agent, allowPreview }) {
+  if (apiKey) {
+    return {
+      project: undefined,
+      openAIClient: new OpenAI({
+        apiKey: "unused",
+        baseURL: `${endpoint}/openai/v1`,
+        defaultHeaders: {
+          "api-key": apiKey,
+          Authorization: null,
+        },
+      }),
+      authMode: "api key",
+    };
+  }
+
   const project = new AIProjectClient(endpoint, new DefaultAzureCredential());
   const agentName = parseAgentReference(agent).name;
   const openAIClient = allowPreview
@@ -222,7 +249,7 @@ function createFoundryClient({ endpoint, agent, allowPreview }) {
       })
     : project.getOpenAIClient();
 
-  return { project, openAIClient };
+  return { project, openAIClient, authMode: "Entra ID" };
 }
 
 async function createConversation(openAIClient, query) {
@@ -531,13 +558,20 @@ async function main() {
     throw new Error("Missing --agent, FOUNDRY_AGENT, or AZURE_EXISTING_AGENT_ID");
   }
 
-  const { project, openAIClient } = createFoundryClient(args);
-  const agent = await resolveAgent(project, args.agent);
+  const { project, openAIClient, authMode } = createFoundryClient(args);
+  const agent = project
+    ? await resolveAgent(project, args.agent)
+    : {
+        name: parseAgentReference(args.agent).name,
+        id: args.agent,
+        version: parseAgentReference(args.agent).version,
+      };
   console.log(
     `Agent: ${agent.name}` +
       (agent.id ? ` (${agent.id})` : "") +
       (agent.version ? ` version ${agent.version}` : "")
   );
+  console.log(`Auth: ${authMode}`);
   console.log(`Runs: ${args.runs}; mode: ${args.reuseConversation ? "single conversation" : "fresh conversation per run"}`);
 
   const results = args.reuseConversation

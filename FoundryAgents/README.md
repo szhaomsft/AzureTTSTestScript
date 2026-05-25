@@ -26,6 +26,8 @@ Edit `C:\Agents\AzureTTSTestScript\FoundryAgents\.env` and set:
 ```text
 AZURE_EXISTING_AIPROJECT_ENDPOINT="https://your-ai-services-account-name.services.ai.azure.com/api/projects/your-project-name"
 AZURE_EXISTING_AGENT_ID="your-foundry-agent-name-or-name-colon-version-or-id"
+# Optional. If omitted, the CLI uses Entra ID via DefaultAzureCredential / az login.
+FOUNDRY_API_KEY=""
 ```
 
 Authenticate with Entra ID before running:
@@ -35,6 +37,8 @@ az login
 ```
 
 The signed-in account must have access to the Foundry project.
+
+If you set `FOUNDRY_API_KEY`, `AZURE_AI_FOUNDRY_API_KEY`, `AZURE_AI_API_KEY`, `AZURE_AI_SERVICES_KEY`, `AZURE_EXISTING_AIPROJECT_KEY`, or `AZURE_OPENAI_API_KEY`, the CLI uses API-key authentication for the OpenAI protocol call instead of Entra ID. In API-key mode, agent management lookup is skipped and `AZURE_EXISTING_AGENT_ID` is used as the agent reference.
 
 ## Run
 
@@ -54,6 +58,7 @@ npm.cmd run latency -- --query "Tell me a story." --runs 100 --reuse-conversatio
 
 ```text
 --endpoint <url>       Foundry project endpoint. Defaults to FOUNDRY_PROJECT_ENDPOINT or AZURE_EXISTING_AIPROJECT_ENDPOINT.
+--api-key <key>        Foundry/OpenAI protocol API key.
 --agent <name-or-id>   Foundry agent name, name:version, or ID. Defaults to FOUNDRY_AGENT or AZURE_EXISTING_AGENT_ID.
 --query <text>         Text query to send.
 --runs <n>             Number of test runs. Default: 100.
