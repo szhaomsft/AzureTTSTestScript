@@ -319,7 +319,7 @@ async function runOne(openAIClient, agentName, conversationId, query, runNumber,
   console.log(`===== Run ${runNumber} ==========`);
   console.log(`     query: ${query}`);
   process.stdout.write("     stream: ");
-  const result = await streamAgentResponse(openAIClient, agentName, conversationId, timeoutMs, {
+  const result = await streamAgentResponse(openAIClient, agentName, conversationId, query, timeoutMs, {
     onToken: (token) => process.stdout.write(token),
   });
   process.stdout.write("\n");
@@ -337,6 +337,7 @@ async function streamAgentResponse(
   openAIClient,
   agentName,
   conversationId,
+  query,
   timeoutMs,
   { onToken = () => {} } = {}
 ) {
@@ -352,11 +353,16 @@ async function streamAgentResponse(
   try {
     const stream = await openAIClient.responses.create(
       {
-        conversation: conversationId,
+        input: query,
         stream: true,
       },
       {
-        body: { agent_reference: { name: agentName, type: "agent_reference" } },
+        body: {
+          input: query,
+          stream: true,
+          conversation: conversationId,
+          agent_reference: { name: agentName, type: "agent_reference" },
+        },
         signal: controller.signal,
       }
     );
