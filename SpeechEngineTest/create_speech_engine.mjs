@@ -29,6 +29,10 @@ const engine = await elevenlabs.speechEngine.create({
   speechEngine: {
     wsUrl: publicWsUrl,
   },
+  language: "zh",
+  tts: {
+    modelId: "eleven_flash_v2_5",
+  },
   turn: {
     turnTimeout: 30,
     silenceEndCallTimeout: 120,
