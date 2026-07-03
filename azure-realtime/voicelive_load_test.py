@@ -602,6 +602,11 @@ def print_report(metrics: Metrics, wall_elapsed: float, args: argparse.Namespace
     print(f"{BOLD}{CYAN}  VOICE LIVE LOAD TEST - SLA & LATENCY REPORT{RESET}")
     print(f"{BOLD}{CYAN}{hline}{RESET}")
 
+    display_voice = args.voice or _DEFAULT_VOICE[classify_model(args.model)]
+    print(f"\n  {BOLD}Configuration{RESET}")
+    print(f"  {'Model':<24} {args.model}")
+    print(f"  {'Voice':<24} {display_voice}")
+
     print(f"\n  {BOLD}Sessions{RESET}")
     print(f"  {'Started':<24} {metrics.sessions_started}")
     print(f"  {'Completed':<24} {GREEN}{metrics.sessions_completed}{RESET}")
@@ -653,13 +658,16 @@ def print_report(metrics: Metrics, wall_elapsed: float, args: argparse.Namespace
     print(f"\n{BOLD}{CYAN}{hline}{RESET}\n")
 
 
-def export_csv(metrics: Metrics, filepath: str) -> None:
+def export_csv(metrics: Metrics, filepath: str, args: argparse.Namespace) -> None:
     import csv
 
+    display_voice = args.voice or _DEFAULT_VOICE[classify_model(args.model)]
     with open(filepath, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(
             [
+                "model",
+                "voice",
                 "session_id",
                 "turn_index",
                 "status",
@@ -675,6 +683,8 @@ def export_csv(metrics: Metrics, filepath: str) -> None:
         for t in metrics.turns:
             writer.writerow(
                 [
+                    args.model,
+                    display_voice,
                     t.session_id,
                     t.turn_index,
                     t.status.value,
@@ -776,7 +786,7 @@ async def run_load_test(args: argparse.Namespace, pcm: bytes) -> None:
                 await credential.close()
         print_report(metrics, wall_elapsed, args)
         if args.csv:
-            export_csv(metrics, args.csv)
+            export_csv(metrics, args.csv, args)
 
 
 # ---------------------------------------------------------------------------
