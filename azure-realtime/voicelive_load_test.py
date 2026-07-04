@@ -159,6 +159,7 @@ class TurnResult:
     input_wav: str = ""
     response_text: str = ""
     error_message: str = ""
+    voicelive_session_id: str = "?"
 
 
 @dataclass
@@ -397,6 +398,25 @@ async def run_turn(
                     text_parts.append(delta)
             elif etype == ServerEventType.RESPONSE_DONE:
                 response_latency = (time.perf_counter() - request_time) * 1000
+                resp = getattr(event, "response", None)
+                status = getattr(resp, "status", None)
+                status_value = getattr(status, "value", status)
+                if status_value in ("failed", "cancelled", "incomplete"):
+                    details = getattr(resp, "status_details", None)
+                    err = getattr(details, "error", None)
+                    reason = (
+                        getattr(err, "message", None)
+                        or getattr(details, "reason", None)
+                        or (str(details) if details else None)
+                        or str(status_value)
+                    )
+                    return TurnResult(
+                        session_id,
+                        turn_index,
+                        TurnStatus.ERROR,
+                        input_audio_ms=input_ms,
+                        error_message=f"response {status_value}: {reason}"[:300],
+                    )
                 return TurnResult(
                     session_id=session_id,
                     turn_index=turn_index,
@@ -450,6 +470,7 @@ async def run_session(
     )
 
     completed_turns = 0
+    vl_session_id = "?"
     try:
         async with connect(
             endpoint=args.endpoint,
@@ -464,6 +485,9 @@ async def run_session(
             try:
                 while True:
                     event = await asyncio.wait_for(conn.recv(), timeout=args.turn_timeout)
+                    sess = getattr(event, "session", None)
+                    if sess is not None and getattr(sess, "id", None):
+                        vl_session_id = sess.id
                     if event.type == ServerEventType.SESSION_UPDATED:
                         break
                     if event.type == ServerEventType.ERROR:
@@ -472,10 +496,16 @@ async def run_session(
                 metrics.sessions_failed += 1
                 print(
                     f"{BOLD}{RED} XX SESSION {session_id:04d} FAILED {RESET} "
+                    f"{DIM}(voicelive_session_id={vl_session_id}){RESET} "
                     f"{RED}setup: {exc}{RESET}",
                     flush=True,
                 )
                 return
+
+            print(
+                f"  {DIM}session {session_id:04d} voicelive_session_id={vl_session_id}{RESET}",
+                flush=True,
+            )
 
             for turn_index in range(num_turns):
                 if stop_event.is_set():
@@ -492,6 +522,7 @@ async def run_session(
                     stop_event,
                 )
                 metrics.add_turn(result)
+                result.voicelive_session_id = vl_session_id
                 completed_turns += 1
 
                 if result.status == TurnStatus.SUCCESS:
@@ -510,7 +541,8 @@ async def run_session(
                     )
                 else:
                     print(
-                        f"  {DIM}session {session_id:04d}{RESET} turn {turn_index + 1}/{num_turns} "
+                        f"  {BOLD}{RED}session {session_id:04d}{RESET} turn {turn_index + 1}/{num_turns} "
+                        f"{DIM}(voicelive_session_id={vl_session_id}){RESET} "
                         f"{RED}{result.status.value}{RESET} {DIM}{result.error_message}{RESET}",
                         flush=True,
                     )
@@ -529,7 +561,8 @@ async def run_session(
     except Exception as exc:  # noqa: BLE001
         metrics.sessions_failed += 1
         print(
-            f"{BOLD}{RED} XX SESSION {session_id:04d} FAILED {RESET} {RED}{exc}{RESET}",
+            f"{BOLD}{RED} XX SESSION {session_id:04d} FAILED {RESET} "
+            f"{DIM}(voicelive_session_id={vl_session_id}){RESET} {RED}{exc}{RESET}",
             flush=True,
         )
 
@@ -663,7 +696,11 @@ def print_report(metrics: Metrics, wall_elapsed: float, args: argparse.Namespace
         print(f"\n  {BOLD}Sample errors:{RESET}")
         for t in failed[:5]:
             if t.error_message:
-                print(f"  {DIM}[s{t.session_id:04d}/t{t.turn_index}] {t.error_message[:110]}{RESET}")
+                print(
+                    f"  {DIM}[s{t.session_id:04d}/t{t.turn_index}] "
+                    f"voicelive_session_id={t.voicelive_session_id} "
+                    f"{t.error_message[:110]}{RESET}"
+                )
 
     print(f"\n{BOLD}{CYAN}{hline}{RESET}\n")
 
@@ -679,6 +716,7 @@ def export_csv(metrics: Metrics, filepath: str, args: argparse.Namespace) -> Non
                 "model",
                 "voice",
                 "session_id",
+                "voicelive_session_id",
                 "turn_index",
                 "status",
                 "response_latency_ms",
@@ -697,6 +735,7 @@ def export_csv(metrics: Metrics, filepath: str, args: argparse.Namespace) -> Non
                     args.model,
                     display_voice,
                     t.session_id,
+                    t.voicelive_session_id,
                     t.turn_index,
                     t.status.value,
                     f"{t.response_latency_ms:.2f}",
