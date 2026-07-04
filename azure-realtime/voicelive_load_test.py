@@ -41,7 +41,7 @@ import wave
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import List, Optional, Tuple, Union
 
 try:
     import audioop  # type: ignore
@@ -156,6 +156,7 @@ class TurnResult:
     first_audio_latency_ms: float = 0.0
     audio_bytes_received: int = 0
     input_audio_ms: float = 0.0
+    input_wav: str = ""
     response_text: str = ""
     error_message: str = ""
 
@@ -341,6 +342,7 @@ async def run_turn(
     session_id: int,
     turn_index: int,
     pcm: bytes,
+    wav_name: str,
     realtime: bool,
     turn_timeout: float,
     stop_event: asyncio.Event,
@@ -361,7 +363,8 @@ async def run_turn(
         while True:
             if stop_event.is_set():
                 return TurnResult(
-                    session_id, turn_index, TurnStatus.CANCELLED, input_audio_ms=input_ms
+                    session_id, turn_index, TurnStatus.CANCELLED,
+                    input_audio_ms=input_ms, input_wav=wav_name,
                 )
             try:
                 event = await asyncio.wait_for(conn.recv(), timeout=turn_timeout)
@@ -371,6 +374,7 @@ async def run_turn(
                     turn_index,
                     TurnStatus.TIMEOUT,
                     input_audio_ms=input_ms,
+                    input_wav=wav_name,
                     error_message=f"No response.done within {turn_timeout:.0f}s",
                 )
 
@@ -401,6 +405,7 @@ async def run_turn(
                     first_audio_latency_ms=first_audio_latency or response_latency,
                     audio_bytes_received=audio_bytes,
                     input_audio_ms=input_ms,
+                    input_wav=wav_name,
                     response_text="".join(text_parts).strip(),
                 )
             elif etype == ServerEventType.ERROR:
@@ -411,6 +416,7 @@ async def run_turn(
                     turn_index,
                     TurnStatus.ERROR,
                     input_audio_ms=input_ms,
+                    input_wav=wav_name,
                     error_message=str(msg)[:300],
                 )
 
@@ -420,6 +426,7 @@ async def run_turn(
             turn_index,
             TurnStatus.ERROR,
             input_audio_ms=input_ms,
+            input_wav=wav_name,
             error_message=f"{type(exc).__name__}: {exc}"[:300],
         )
 
@@ -428,7 +435,7 @@ async def run_session(
     session_id: int,
     args: argparse.Namespace,
     credential: Union[AzureKeyCredential, "object"],
-    pcm: bytes,
+    clips: List[Tuple[str, bytes]],
     metrics: Metrics,
     stop_event: asyncio.Event,
 ) -> None:
@@ -473,11 +480,13 @@ async def run_session(
             for turn_index in range(num_turns):
                 if stop_event.is_set():
                     break
+                wav_name, pcm = random.choice(clips)
                 result = await run_turn(
                     conn,
                     session_id,
                     turn_index,
                     pcm,
+                    wav_name,
                     args.realtime,
                     args.turn_timeout,
                     stop_event,
@@ -492,7 +501,8 @@ async def run_session(
                         text = text[:200] + "..."
                     print(
                         f"  {DIM}session {session_id:04d}{RESET} turn {turn_index + 1}/{num_turns} "
-                        f"{GREEN}ok{RESET} first-audio={result.first_audio_latency_ms:.0f}ms "
+                        f"{GREEN}ok{RESET} {DIM}wav={wav_name}{RESET} "
+                        f"first-audio={result.first_audio_latency_ms:.0f}ms "
                         f"response={result.response_latency_ms:.0f}ms "
                         f"audio={audio_ms / 1000:.2f}s ({result.audio_bytes_received:,}B)\n"
                         f"    {DIM}text:{RESET} {text}",
@@ -533,7 +543,7 @@ async def worker(
     worker_id: int,
     args: argparse.Namespace,
     credential,
-    pcm: bytes,
+    clips: List[Tuple[str, bytes]],
     metrics: Metrics,
     stop_event: asyncio.Event,
     session_counter: "SessionCounter",
@@ -543,7 +553,7 @@ async def worker(
         session_id = session_counter.next()
         if session_id is None:
             break
-        await run_session(session_id, args, credential, pcm, metrics, stop_event)
+        await run_session(session_id, args, credential, clips, metrics, stop_event)
 
 
 class SessionCounter:
@@ -676,6 +686,7 @@ def export_csv(metrics: Metrics, filepath: str, args: argparse.Namespace) -> Non
                 "audio_bytes_received",
                 "audio_duration_s",
                 "input_audio_ms",
+                "input_wav",
                 "response_text",
                 "error_message",
             ]
@@ -693,6 +704,7 @@ def export_csv(metrics: Metrics, filepath: str, args: argparse.Namespace) -> Non
                     t.audio_bytes_received,
                     f"{pcm_duration_ms(b'0' * t.audio_bytes_received) / 1000:.3f}",
                     f"{t.input_audio_ms:.2f}",
+                    t.input_wav,
                     t.response_text,
                     t.error_message,
                 ]
@@ -727,7 +739,7 @@ def build_credential(args: argparse.Namespace):
 # ---------------------------------------------------------------------------
 
 
-async def run_load_test(args: argparse.Namespace, pcm: bytes) -> None:
+async def run_load_test(args: argparse.Namespace, clips: List[Tuple[str, bytes]]) -> None:
     metrics = Metrics()
     stop_event = asyncio.Event()
     credential = build_credential(args)
@@ -754,11 +766,12 @@ async def run_load_test(args: argparse.Namespace, pcm: bytes) -> None:
             signal.signal(signal.SIGINT, lambda *_: loop.call_soon_threadsafe(_request_stop))
 
     display_voice = args.voice or _DEFAULT_VOICE[classify_model(args.model)]
+    wav_summary = ", ".join(f"{n} ({pcm_duration_ms(p)/1000:.1f}s)" for n, p in clips)
     print(
         f"{BOLD}Azure Voice Live load test{RESET}\n"
         f"{DIM}endpoint={args.endpoint} model={args.model} voice={display_voice}\n"
         f"sessions={args.sessions} turns={args.min_turns}-{args.max_turns} "
-        f"wav={args.wav} ({pcm_duration_ms(pcm)/1000:.1f}s) "
+        f"wavs=[{wav_summary}] (random per turn) "
         f"pacing={'real-time' if args.realtime else 'max-speed'}{RESET}\n"
         f"{DIM}Press Ctrl+C to stop and print the SLA report.{RESET}\n"
     )
@@ -766,7 +779,7 @@ async def run_load_test(args: argparse.Namespace, pcm: bytes) -> None:
     wall_start = time.perf_counter()
     workers = [
         asyncio.create_task(
-            worker(i, args, credential, pcm, metrics, stop_event, counter)
+            worker(i, args, credential, clips, metrics, stop_event, counter)
         )
         for i in range(args.sessions)
     ]
@@ -799,7 +812,13 @@ def parse_args() -> argparse.Namespace:
         description="Azure Voice Live API parallel-session load test (azure-ai-voicelive)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--wav", required=True, help="Path to the WAV file replayed as the user turn.")
+    parser.add_argument(
+        "--wav",
+        required=True,
+        nargs="+",
+        help="One or more WAV files replayed as the user turn. "
+        "A file is chosen at random for each turn.",
+    )
     parser.add_argument(
         "--endpoint",
         default=os.environ.get("AZURE_VOICELIVE_ENDPOINT"),
@@ -874,22 +893,26 @@ def parse_args() -> argparse.Namespace:
         parser.error("--sessions must be >= 1")
     if not (1 <= args.min_turns <= args.max_turns):
         parser.error("require 1 <= --min-turns <= --max-turns")
-    if not Path(args.wav).is_file():
-        parser.error(f"WAV file not found: {args.wav}")
+    for w in args.wav:
+        if not Path(w).is_file():
+            parser.error(f"WAV file not found: {w}")
 
     return args
 
 
 def main() -> None:
     args = parse_args()
+    clips: List[Tuple[str, bytes]] = []
     try:
-        pcm = load_wav_as_pcm16_mono(Path(args.wav))
+        for w in args.wav:
+            path = Path(w)
+            clips.append((path.name, load_wav_as_pcm16_mono(path)))
     except Exception as exc:  # noqa: BLE001
         print(f"{RED}ERROR loading WAV: {exc}{RESET}")
         sys.exit(1)
 
     try:
-        asyncio.run(run_load_test(args, pcm))
+        asyncio.run(run_load_test(args, clips))
     except KeyboardInterrupt:
         # asyncio.run may re-raise if Ctrl+C fires during shutdown.
         print(f"\n{YELLOW}Interrupted.{RESET}")

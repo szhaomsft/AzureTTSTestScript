@@ -57,6 +57,16 @@ python voicelive_load_test.py --wav sample.wav --sessions 10 `
   --max-sessions 100 --csv results.csv
 ```
 
+Multiple WAVs (a file is chosen at random for each turn):
+
+```powershell
+python voicelive_load_test.py --wav a.wav b.wav c.wav --sessions 10 `
+  --endpoint wss://<resource>.services.ai.azure.com --use-api-key --api-key <KEY>
+```
+
+The chosen file per turn is shown in the log line (`wav=...`) and recorded in the
+`input_wav` CSV column.
+
 Any 16-bit / 8-bit / stereo / arbitrary-sample-rate PCM WAV is accepted; it is
 converted to 24 kHz mono PCM16 automatically. Audio is streamed real-time paced
 by default (use `--no-realtime` to send as fast as possible).
