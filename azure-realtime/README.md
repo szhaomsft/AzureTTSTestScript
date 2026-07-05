@@ -67,13 +67,32 @@ python voicelive_load_test.py --wav a.wav b.wav c.wav --sessions 10 `
 The chosen file per turn is shown in the log line (`wav=...`) and recorded in the
 `input_wav` CSV column.
 
+### Agent mode (Azure AI Foundry agent)
+
+Instead of a model, connect to an [Azure AI Foundry agent](https://learn.microsoft.com/azure/ai-services/speech-service/voice-live-how-to).
+The model, instructions and (unless overridden) voice come from the agent, so
+`--model`/`--instructions` are ignored. Entra ID auth is recommended.
+
+```powershell
+# az login first
+python voicelive_load_test.py --wav a.wav b.wav --sessions 10 `
+  --endpoint wss://<resource>.services.ai.azure.com `
+  --agent-name <AGENT_NAME> --project-name <FOUNDRY_PROJECT>
+```
+
+`--agent-name` and `--project-name` are both required together. Optional:
+`--agent-version`, `--conversation-id`, and `--voice` to force a voice. The
+report and CSV show `agent:<name>` instead of a model.
+
 Any 16-bit / 8-bit / stereo / arbitrary-sample-rate PCM WAV is accepted; it is
 converted to 24 kHz mono PCM16 automatically. Audio is streamed real-time paced
 by default (use `--no-realtime` to send as fast as possible).
 
 Environment variables (`.env` supported): `AZURE_VOICELIVE_ENDPOINT`,
 `AZURE_VOICELIVE_MODEL`, `AZURE_VOICELIVE_VOICE`, `AZURE_VOICELIVE_API_KEY`,
-`AZURE_VOICELIVE_USE_API_KEY`, `AZURE_VOICELIVE_INSTRUCTIONS`.
+`AZURE_VOICELIVE_USE_API_KEY`, `AZURE_VOICELIVE_INSTRUCTIONS`,
+`AZURE_VOICELIVE_AGENT_NAME`, `AZURE_VOICELIVE_PROJECT_NAME`,
+`AZURE_VOICELIVE_AGENT_VERSION`, `AZURE_VOICELIVE_CONVERSATION_ID`.
 
 > **Voice** — the config type is auto-detected from the `--voice` name **and the
 > `--model` family**, and the default voice depends on the model:

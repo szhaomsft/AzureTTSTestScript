@@ -308,8 +308,26 @@ def build_voice_config(voice: Optional[str], model: str):
     return voice
 
 
-def build_session(voice: Optional[str], instructions: str, model: str) -> RequestSession:
-    """Build a manual-turn Voice Live session (server VAD disabled)."""
+def build_session(
+    voice: Optional[str], instructions: str, model: str, agent_mode: bool = False
+) -> RequestSession:
+    """Build a manual-turn Voice Live session (server VAD disabled).
+
+    In agent mode the model, instructions and voice are defined by the Azure AI
+    Foundry agent, so they are omitted here; only the audio format and manual
+    turn control are set. A voice may still be forced via ``--voice``.
+    """
+    if agent_mode:
+        session_kwargs = dict(
+            modalities=[Modality.TEXT, Modality.AUDIO],
+            input_audio_format=InputAudioFormat.PCM16,
+            output_audio_format=OutputAudioFormat.PCM16,
+            input_audio_sampling_rate=TARGET_SAMPLE_RATE,
+            turn_detection=None,
+        )
+        if voice:
+            session_kwargs["voice"] = build_voice_config(voice, model)
+        return RequestSession(**session_kwargs)
     return RequestSession(
         modalities=[Modality.TEXT, Modality.AUDIO],
         instructions=instructions,
@@ -465,20 +483,29 @@ async def run_session(
 
     print(
         f"{BOLD}{BG_GREEN}{_ansi('30')} >> SESSION {session_id:04d} START {RESET} "
-        f"{GREEN}{num_turns} turns planned{RESET} {DIM}(model={args.model}){RESET}",
+        f"{GREEN}{num_turns} turns planned{RESET} "
+        f"{DIM}({'agent=' + args.agent_name if args.agent_name else 'model=' + args.model}){RESET}",
         flush=True,
     )
 
     completed_turns = 0
     vl_session_id = "?"
     try:
-        async with connect(
-            endpoint=args.endpoint,
-            credential=credential,
-            model=args.model,
-        ) as conn:
+        connect_kwargs = dict(endpoint=args.endpoint, credential=credential)
+        if args.agent_name:
+            connect_kwargs["agent_name"] = args.agent_name
+            connect_kwargs["project_name"] = args.project_name
+            if args.agent_version:
+                connect_kwargs["agent_version"] = args.agent_version
+            if args.conversation_id:
+                connect_kwargs["conversation_id"] = args.conversation_id
+        else:
+            connect_kwargs["model"] = args.model
+        async with connect(**connect_kwargs) as conn:
             await conn.session.update(
-                session=build_session(args.voice, args.instructions, args.model)
+                session=build_session(
+                    args.voice, args.instructions, args.model, bool(args.agent_name)
+                )
             )
 
             # Wait for session.updated confirmation before driving turns.
@@ -645,10 +672,19 @@ def print_report(metrics: Metrics, wall_elapsed: float, args: argparse.Namespace
     print(f"{BOLD}{CYAN}  VOICE LIVE LOAD TEST - SLA & LATENCY REPORT{RESET}")
     print(f"{BOLD}{CYAN}{hline}{RESET}")
 
-    display_voice = args.voice or _DEFAULT_VOICE[classify_model(args.model)]
     print(f"\n  {BOLD}Configuration{RESET}")
-    print(f"  {'Model':<24} {args.model}")
-    print(f"  {'Voice':<24} {display_voice}")
+    if args.agent_name:
+        print(f"  {'Mode':<24} agent")
+        print(f"  {'Agent':<24} {args.agent_name}")
+        print(f"  {'Project':<24} {args.project_name}")
+        if args.agent_version:
+            print(f"  {'Agent version':<24} {args.agent_version}")
+        if args.voice:
+            print(f"  {'Voice':<24} {args.voice}")
+    else:
+        display_voice = args.voice or _DEFAULT_VOICE[classify_model(args.model)]
+        print(f"  {'Model':<24} {args.model}")
+        print(f"  {'Voice':<24} {display_voice}")
 
     print(f"\n  {BOLD}Sessions{RESET}")
     print(f"  {'Started':<24} {metrics.sessions_started}")
@@ -708,7 +744,12 @@ def print_report(metrics: Metrics, wall_elapsed: float, args: argparse.Namespace
 def export_csv(metrics: Metrics, filepath: str, args: argparse.Namespace) -> None:
     import csv
 
-    display_voice = args.voice or _DEFAULT_VOICE[classify_model(args.model)]
+    if args.agent_name:
+        model_label = f"agent:{args.agent_name}"
+        display_voice = args.voice or ""
+    else:
+        model_label = args.model
+        display_voice = args.voice or _DEFAULT_VOICE[classify_model(args.model)]
     with open(filepath, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(
@@ -732,7 +773,7 @@ def export_csv(metrics: Metrics, filepath: str, args: argparse.Namespace) -> Non
         for t in metrics.turns:
             writer.writerow(
                 [
-                    args.model,
+                    model_label,
                     display_voice,
                     t.session_id,
                     t.voicelive_session_id,
@@ -804,11 +845,17 @@ async def run_load_test(args: argparse.Namespace, clips: List[Tuple[str, bytes]]
         with contextlib.suppress(ValueError, OSError):
             signal.signal(signal.SIGINT, lambda *_: loop.call_soon_threadsafe(_request_stop))
 
-    display_voice = args.voice or _DEFAULT_VOICE[classify_model(args.model)]
+    if args.agent_name:
+        target = f"agent={args.agent_name} project={args.project_name}"
+        if args.voice:
+            target += f" voice={args.voice}"
+    else:
+        display_voice = args.voice or _DEFAULT_VOICE[classify_model(args.model)]
+        target = f"model={args.model} voice={display_voice}"
     wav_summary = ", ".join(f"{n} ({pcm_duration_ms(p)/1000:.1f}s)" for n, p in clips)
     print(
         f"{BOLD}Azure Voice Live load test{RESET}\n"
-        f"{DIM}endpoint={args.endpoint} model={args.model} voice={display_voice}\n"
+        f"{DIM}endpoint={args.endpoint} {target}\n"
         f"sessions={args.sessions} turns={args.min_turns}-{args.max_turns} "
         f"wavs=[{wav_summary}] (random per turn) "
         f"pacing={'real-time' if args.realtime else 'max-speed'}{RESET}\n"
@@ -869,7 +916,31 @@ def parse_args() -> argparse.Namespace:
         default=os.environ.get("AZURE_VOICELIVE_MODEL", "azure-realtime"),
         help="Voice Live model. Native speech-to-speech: azure-realtime "
         "(default), gpt-realtime, gpt-realtime-mini. Cascade/text models: "
-        "gpt-4.1, gpt-4o, gpt-4o-mini, phi4-mm-realtime, etc.",
+        "gpt-4.1, gpt-4o, gpt-4o-mini, phi4-mm-realtime, etc. Ignored in agent "
+        "mode (--agent-name).",
+    )
+    parser.add_argument(
+        "--agent-name",
+        default=os.environ.get("AZURE_VOICELIVE_AGENT_NAME"),
+        help="Azure AI Foundry agent name. When set, the test connects in agent "
+        "mode (model/instructions come from the agent) and --project-name is "
+        "required. (env: AZURE_VOICELIVE_AGENT_NAME)",
+    )
+    parser.add_argument(
+        "--project-name",
+        default=os.environ.get("AZURE_VOICELIVE_PROJECT_NAME"),
+        help="Azure AI Foundry project name (required with --agent-name). "
+        "(env: AZURE_VOICELIVE_PROJECT_NAME)",
+    )
+    parser.add_argument(
+        "--agent-version",
+        default=os.environ.get("AZURE_VOICELIVE_AGENT_VERSION"),
+        help="Optional Azure AI Foundry agent version.",
+    )
+    parser.add_argument(
+        "--conversation-id",
+        default=os.environ.get("AZURE_VOICELIVE_CONVERSATION_ID"),
+        help="Optional Azure AI Foundry conversation ID to continue.",
     )
     parser.add_argument(
         "--voice",
@@ -935,6 +1006,10 @@ def parse_args() -> argparse.Namespace:
     for w in args.wav:
         if not Path(w).is_file():
             parser.error(f"WAV file not found: {w}")
+    if args.agent_name and not args.project_name:
+        parser.error("--project-name is required when --agent-name is set")
+    if args.project_name and not args.agent_name:
+        parser.error("--agent-name is required when --project-name is set")
 
     return args
 
