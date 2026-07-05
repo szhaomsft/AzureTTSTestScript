@@ -52,6 +52,7 @@ except ImportError:  # Python 3.13+ moved audioop out of stdlib
         audioop = None  # type: ignore
 
 from azure.core.credentials import AzureKeyCredential
+from azure.core.credentials_async import AsyncTokenCredential
 from azure.ai.voicelive.aio import connect
 from azure.ai.voicelive.models import (
     AzureRealtimeNativeVoice,
@@ -811,7 +812,46 @@ def build_credential(args: argparse.Namespace):
             f"Install it or use --use-api-key.{RESET}"
         )
         sys.exit(1)
-    return DefaultAzureCredential()
+    return _CachingTokenCredential(DefaultAzureCredential())
+
+
+class _CachingTokenCredential(AsyncTokenCredential):
+    """Async token credential wrapper that caches tokens across sessions.
+
+    The Voice Live SDK requests a token on *every* ``connect()``. Some inner
+    credentials (notably ``AzureCliCredential``) do not cache and spawn a fresh
+    ``az`` subprocess per call, so many parallel sessions produce a burst of
+    subprocesses that time out ("Timed out waiting for Azure CLI"). This wrapper
+    fetches a token once per scope (serialized by a lock) and returns the cached
+    token to all sessions until it nears expiry.
+    """
+
+    _REFRESH_MARGIN_S = 300
+
+    def __init__(self, inner):
+        self._inner = inner
+        self._lock = asyncio.Lock()
+        self._cache: dict = {}
+
+    def _valid(self, token) -> bool:
+        return token is not None and (token.expires_on - time.time()) > self._REFRESH_MARGIN_S
+
+    async def get_token(self, *scopes, **kwargs):
+        key = tuple(scopes)
+        token = self._cache.get(key)
+        if self._valid(token):
+            return token
+        async with self._lock:
+            token = self._cache.get(key)
+            if self._valid(token):
+                return token
+            token = await self._inner.get_token(*scopes, **kwargs)
+            self._cache[key] = token
+            return token
+
+    async def close(self):
+        with contextlib.suppress(Exception):
+            await self._inner.close()
 
 
 # ---------------------------------------------------------------------------
@@ -824,6 +864,25 @@ async def run_load_test(args: argparse.Namespace, clips: List[Tuple[str, bytes]]
     stop_event = asyncio.Event()
     credential = build_credential(args)
     counter = SessionCounter(args.max_sessions)
+
+    # Pre-warm the Entra ID token once so that launching many parallel sessions
+    # does not trigger a "thundering herd" of concurrent cold token fetches
+    # (which can make DefaultAzureCredential intermittently fail under load).
+    # The SDK requests a fresh token on every connect(); a warmed, cached token
+    # is reused by all sessions.
+    if not args.use_api_key:
+        try:
+            await credential.get_token("https://ai.azure.com/.default")
+        except Exception as exc:  # noqa: BLE001
+            print(
+                f"{RED}ERROR: could not acquire an Entra ID token via "
+                f"DefaultAzureCredential: {exc}{RESET}\n"
+                f"{DIM}Run 'az login' (or configure a managed identity / env "
+                f"credentials), or use --use-api-key.{RESET}"
+            )
+            with contextlib.suppress(Exception):
+                await credential.close()
+            return
 
     loop = asyncio.get_running_loop()
 
