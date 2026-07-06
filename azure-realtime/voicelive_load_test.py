@@ -493,6 +493,8 @@ async def run_session(
     vl_session_id = "?"
     try:
         connect_kwargs = dict(endpoint=args.endpoint, credential=credential)
+        if args.traffic_type:
+            connect_kwargs["query"] = {"traffictype": args.traffic_type}
         if args.agent_name:
             connect_kwargs["agent_name"] = args.agent_name
             connect_kwargs["project_name"] = args.project_name
@@ -912,9 +914,10 @@ async def run_load_test(args: argparse.Namespace, clips: List[Tuple[str, bytes]]
         display_voice = args.voice or _DEFAULT_VOICE[classify_model(args.model)]
         target = f"model={args.model} voice={display_voice}"
     wav_summary = ", ".join(f"{n} ({pcm_duration_ms(p)/1000:.1f}s)" for n, p in clips)
+    traffic_note = f" trafficType={args.traffic_type}" if args.traffic_type else ""
     print(
         f"{BOLD}Azure Voice Live load test{RESET}\n"
-        f"{DIM}endpoint={args.endpoint} {target}\n"
+        f"{DIM}endpoint={args.endpoint} {target}{traffic_note}\n"
         f"sessions={args.sessions} turns={args.min_turns}-{args.max_turns} "
         f"wavs=[{wav_summary}] (random per turn) "
         f"pacing={'real-time' if args.realtime else 'max-speed'}{RESET}\n"
@@ -969,6 +972,14 @@ def parse_args() -> argparse.Namespace:
         default=os.environ.get("AZURE_VOICELIVE_ENDPOINT"),
         help="Voice Live endpoint, e.g. wss://<resource>.services.ai.azure.com "
         "(env: AZURE_VOICELIVE_ENDPOINT)",
+    )
+    parser.add_argument(
+        "--traffic-type",
+        default=os.environ.get("AZURE_VOICELIVE_TRAFFIC_TYPE", "loadtest"),
+        help="Value for the 'trafficType' URL query parameter used to tag "
+        "server-side telemetry/logs for this run (default: 'loadtest'). "
+        "Pass an empty string ('') to omit it. "
+        "(env: AZURE_VOICELIVE_TRAFFIC_TYPE)",
     )
     parser.add_argument(
         "--model",

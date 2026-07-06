@@ -92,7 +92,13 @@ Environment variables (`.env` supported): `AZURE_VOICELIVE_ENDPOINT`,
 `AZURE_VOICELIVE_MODEL`, `AZURE_VOICELIVE_VOICE`, `AZURE_VOICELIVE_API_KEY`,
 `AZURE_VOICELIVE_USE_API_KEY`, `AZURE_VOICELIVE_INSTRUCTIONS`,
 `AZURE_VOICELIVE_AGENT_NAME`, `AZURE_VOICELIVE_PROJECT_NAME`,
-`AZURE_VOICELIVE_AGENT_VERSION`, `AZURE_VOICELIVE_CONVERSATION_ID`.
+`AZURE_VOICELIVE_AGENT_VERSION`, `AZURE_VOICELIVE_CONVERSATION_ID`,
+`AZURE_VOICELIVE_TRAFFIC_TYPE`.
+
+> **Traffic type** — every connection sends a `trafficType` URL query parameter
+> (default `loadtest`, override with `--traffic-type` / `AZURE_VOICELIVE_TRAFFIC_TYPE`)
+> which the service uses to tag its telemetry/logs for the run. Pass
+> `--traffic-type ""` to omit it.
 
 > **Voice** — the config type is auto-detected from the `--voice` name **and the
 > `--model` family**, and the default voice depends on the model:
